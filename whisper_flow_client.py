@@ -193,7 +193,6 @@ class WhisperFlowClient:
             return
 
         self._log("Transcribing...")
-        self._alerts.play_processing()
 
         try:
             text = await self._call_whisper(frames)
@@ -210,8 +209,10 @@ class WhisperFlowClient:
         self._log(f"Transcription: '{text.strip()}'")
         typed = self._typer.type_text(text.strip())
         if typed:
+            self._alerts.play_done()
             self._log("Text typed at cursor position")
         else:
+            self._alerts.play_error()
             self._log("Warning: text typing failed")
 
     async def _call_whisper(self, frames: list) -> str:
