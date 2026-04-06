@@ -1,66 +1,108 @@
 """
 Integration tests for AudioRecorder.
 
-Verifies device discovery, start/stop control, and that recorded
-frames accumulate correctly over time. Requires a real microphone.
+These tests capture real microphone audio and verify timing, frame
+format, and start/stop state transitions against actual hardware.
+
+Requirements: microphone input device.
+
+Run with:
+    pytest tests/integration/test_audio_recorder.py -v
 """
 
 import time
 import pytest
 
-from whisper_dictate.audio.alerts import AudioAlertsManager
 from whisper_dictate.audio.recorder import AudioRecorder
 
-
-@pytest.fixture
-def silent_recorder():
-    """AudioRecorder with alerts disabled to avoid noise during tests."""
-    alerts = AudioAlertsManager(enabled=False)
-    recorder = AudioRecorder(alerts=alerts, verbose=False)
-    recorder.setup()
-    yield recorder
-    recorder.teardown()
+pytestmark = pytest.mark.integration
 
 
-def test_setup_finds_device(silent_recorder):
-    assert silent_recorder.device_index is not None
-    assert silent_recorder.sample_rate in AudioRecorder.PREFERRED_SAMPLE_RATES
+class TestDeviceDiscovery:
+    """setup() finds a usable input device and stores a valid configuration."""
+
+    def test_device_index_is_set(self, recorder):
+        assert recorder.device_index is not None
+
+    def test_sample_rate_is_a_known_value(self, recorder):
+        assert recorder.sample_rate in AudioRecorder.PREFERRED_SAMPLE_RATES
+
+    def test_setup_returns_true(self, silent_alerts):
+        rec = AudioRecorder(alerts=silent_alerts, verbose=False)
+        result = rec.setup()
+        rec.teardown()
+        assert result is True
 
 
-def test_start_sets_is_recording(silent_recorder):
-    assert not silent_recorder.is_recording
-    silent_recorder.start_recording()
-    assert silent_recorder.is_recording
-    silent_recorder.stop_recording()
+class TestRecordingStateTransitions:
+    """start_recording() and stop_recording() manage is_recording correctly."""
+
+    def test_initially_not_recording(self, recorder):
+        assert recorder.is_recording is False
+
+    def test_is_recording_after_start(self, recorder):
+        recorder.start_recording()
+        assert recorder.is_recording is True
+        recorder.stop_recording()
+
+    def test_not_recording_after_stop(self, recorder):
+        recorder.start_recording()
+        recorder.stop_recording()
+        assert recorder.is_recording is False
+
+    def test_start_is_idempotent(self, recorder):
+        """Calling start_recording() twice does not raise or corrupt state."""
+        recorder.start_recording()
+        result = recorder.start_recording()   # second call should return False
+        assert result is False
+        recorder.stop_recording()
 
 
-def test_recording_accumulates_chunks(silent_recorder):
-    silent_recorder.start_recording()
-    time.sleep(1.0)
-    duration = silent_recorder.get_duration()
-    assert duration > 0.5, f"Expected >0.5s, got {duration:.2f}s"
-    silent_recorder.stop_recording()
+class TestAudioCapture:
+    """Audio frames are captured with the expected format and timing."""
+
+    def test_frames_accumulate_during_recording(self, recorder):
+        recorder.start_recording()
+        time.sleep(1.0)
+        duration = recorder.get_duration()
+        recorder.stop_recording()
+        assert duration > 0.5, f"Expected >0.5s buffered, got {duration:.2f}s"
+
+    def test_stop_returns_list_of_bytes(self, recorder):
+        recorder.start_recording()
+        time.sleep(0.5)
+        frames = recorder.stop_recording()
+        assert isinstance(frames, list)
+        assert len(frames) > 0
+        assert all(isinstance(f, bytes) for f in frames)
+
+    def test_each_chunk_has_expected_size(self, recorder):
+        recorder.start_recording()
+        time.sleep(0.5)
+        frames = recorder.stop_recording()
+        expected = AudioRecorder.CHUNK_SIZE * 2  # paInt16 = 2 bytes per sample
+        assert all(len(f) == expected for f in frames)
+
+    def test_stop_when_idle_returns_empty_list(self, recorder):
+        frames = recorder.stop_recording()
+        assert frames == []
+
+    def test_get_duration_is_zero_before_recording(self, recorder):
+        assert recorder.get_duration() == pytest.approx(0.0)
 
 
-def test_stop_returns_pcm_frames(silent_recorder):
-    silent_recorder.start_recording()
-    time.sleep(1.0)
-    frames = silent_recorder.stop_recording()
-    assert isinstance(frames, list)
-    assert len(frames) > 0
-    assert all(isinstance(f, bytes) for f in frames)
+class TestTeardown:
+    """teardown() releases resources cleanly and is safe to call multiple times."""
 
+    def test_teardown_after_recording_does_not_raise(self, silent_alerts):
+        rec = AudioRecorder(alerts=silent_alerts, verbose=False)
+        rec.setup()
+        rec.start_recording()
+        time.sleep(0.2)
+        rec.teardown()
 
-def test_stop_when_idle_returns_empty_list(silent_recorder):
-    frames = silent_recorder.stop_recording()
-    assert frames == []
-
-
-def test_teardown_is_idempotent():
-    alerts = AudioAlertsManager(enabled=False)
-    recorder = AudioRecorder(alerts=alerts, verbose=False)
-    recorder.setup()
-    recorder.start_recording()
-    time.sleep(0.2)
-    recorder.teardown()
-    recorder.teardown()  # second call must not crash
+    def test_teardown_is_idempotent(self, silent_alerts):
+        rec = AudioRecorder(alerts=silent_alerts, verbose=False)
+        rec.setup()
+        rec.teardown()
+        rec.teardown()  # second call must not raise

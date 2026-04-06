@@ -61,8 +61,12 @@ whisper_dictate = ["sounds/*.mp3", "sounds/*.wav"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"]
+testpaths = ["tests/unit", "tests/integration"]
 timeout = 30
+markers = [
+    "unit: fast tests with no hardware or network required",
+    "integration: tests that require real audio hardware (microphone/speakers)",
+]
 
 [tool.black]
 line-length = 100
