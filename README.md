@@ -18,32 +18,56 @@ F9 pressed  →  audio alert (stop)   →  audio sent to Whisper API
 
 ## Installation
 
-### From source (recommended for development)
+### Prerequisites
+
+- [Miniconda or Anaconda](https://docs.conda.io/en/latest/miniconda.html)
+- An [OpenAI API key](https://platform.openai.com/api-keys)
+
+### 1. Clone and create the environment
 
 ```bash
 git clone https://github.com/your-org/whisper-dictate.git
 cd whisper-dictate
 
-# Create and activate a conda environment
-conda create -n whisper-dictate python=3.11 -y
+# Create the conda environment from environment.yml (includes PyAudio + all deps)
+conda env create -f environment.yml
+
+# Activate it
 conda activate whisper-dictate
-
-# Install PyAudio via conda (handles system audio dependencies)
-conda install -c conda-forge pyaudio -y
-
-# Install the package with all dependencies
-pip install -e ".[dev]"
 ```
 
-### Configure your API key
+> `environment.yml` installs PyAudio via `conda-forge`, which automatically handles
+> the PortAudio system dependency on Linux, macOS, and Windows.
+
+### 2. Install the package in editable mode
+
+```bash
+pip install -e .
+```
+
+This registers the `whisper-dictate` command and lets you edit source files without reinstalling.
+
+### 3. Configure your API key
 
 ```bash
 cp .env.example .env
-# Edit .env and set your OpenAI API key:
-# OPENAI_API_KEY=sk-your_actual_key_here
+```
+
+Open `.env` and set your key:
+
+```
+OPENAI_API_KEY=sk-your_actual_key_here
 ```
 
 > **Never commit `.env` to version control.** It is listed in `.gitignore`.
+
+### Updating the environment
+
+If `environment.yml` changes after a `git pull`:
+
+```bash
+conda env update -f environment.yml --prune
+```
 
 ---
 
@@ -171,11 +195,14 @@ pylint whisper_dictate/
 ```
 whisper-dictate/
 ├── whisper_dictate/     # Main package
+│   ├── audio/           # Microphone capture and audio alerts
+│   ├── transcription/   # Backend interface + OpenAI implementation
+│   └── typing/          # Keyboard injection (pynput)
 ├── tests/
 │   ├── unit/            # Fast, no external dependencies
 │   └── integration/     # Require microphone / audio hardware
-├── sounds/              # Root-level sound files (also copied into package)
-├── pyproject.toml       # Package metadata and build config
+├── environment.yml      # Conda environment definition (start here)
+├── pyproject.toml       # Package metadata and pip dependencies
 ├── .env.example         # Environment variable template
 └── README.md
 ```
