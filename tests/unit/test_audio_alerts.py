@@ -98,20 +98,22 @@ class TestSoundFileRouting:
             called_path = mock_play_file.call_args[0][0]
             assert called_path.endswith(filename)
 
-    def test_falls_back_to_tones_when_file_missing(self):
+    def test_does_nothing_when_file_missing(self):
+        """When the sound file doesn't exist, _play_event returns silently."""
         a = self._alerts_with_mocked_pygame()
-        with patch.object(a, "_play_tones") as mock_tones, \
+        with patch.object(a, "_play_file") as mock_play_file, \
              patch("os.path.isfile", return_value=False):
             a._play_event("start")
-            mock_tones.assert_called_once()
+            mock_play_file.assert_not_called()
 
-    def test_falls_back_to_tones_when_pygame_unavailable(self):
+    def test_does_nothing_when_pygame_unavailable(self):
+        """When pygame failed to init, _play_event returns silently."""
         with patch("whisper_dictate.audio.alerts.AudioAlertsManager._init_pygame", return_value=False):
             a = AudioAlertsManager(volume=0.5)
-        with patch.object(a, "_play_tones") as mock_tones, \
+        with patch.object(a, "_play_file") as mock_play_file, \
              patch("os.path.isfile", return_value=True):
             a._play_event("start")
-            mock_tones.assert_called_once()
+            mock_play_file.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

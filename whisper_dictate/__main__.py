@@ -83,7 +83,7 @@ async def async_main(args: argparse.Namespace) -> int:
 
     alerts = AudioAlertsManager(volume=args.volume, enabled=not args.no_alerts)
     typer = TextTyper(char_delay=args.char_delay, add_space_before=args.add_space)
-    backend = OpenAIWhisperBackend(api_key=settings.openai_api_key)
+    backend = OpenAIWhisperBackend(api_key=settings.openai_api_key, model=settings.whisper_model)
 
     client = WhisperDictateClient(
         backend=backend,

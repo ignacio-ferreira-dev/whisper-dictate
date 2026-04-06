@@ -63,7 +63,11 @@ class WhisperDictateClient:
         self._hotkey_name = hotkey.upper()
 
         self._alerts = alerts or AudioAlertsManager()
-        self._recorder = AudioRecorder(alerts=self._alerts, verbose=verbose)
+        self._recorder = AudioRecorder(
+            alerts=self._alerts,
+            verbose=verbose,
+            on_auto_stop=self._on_recorder_auto_stop,
+        )
         self._typer = typer or TextTyper()
 
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -115,6 +119,16 @@ class WhisperDictateClient:
         except Exception:
             pass
 
+    def _on_recorder_auto_stop(self) -> None:
+        """
+        Called from the recorder's capture thread when recording stops automatically
+        (max duration or stream error). Schedules transcription on the event loop.
+        """
+        if self._loop:
+            asyncio.run_coroutine_threadsafe(
+                self._transcribe_pending(), self._loop
+            )
+
     async def _toggle_recording(self) -> None:
         """Start or stop recording depending on the current state."""
         if self._recorder.is_recording:
@@ -125,6 +139,14 @@ class WhisperDictateClient:
                 self._log("No audio captured")
         else:
             self._recorder.start_recording()
+
+    async def _transcribe_pending(self) -> None:
+        """Transcribe frames that were buffered by an auto-stopped recording."""
+        frames = self._recorder.stop_recording()
+        if frames:
+            await self._transcribe_and_type(frames)
+        else:
+            self._log("No audio captured")
 
     # ------------------------------------------------------------------
     # Transcription + typing

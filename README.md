@@ -1,8 +1,10 @@
 # whisper_dictate
 
-Global voice-to-keyboard for Linux and macOS. Press a hotkey, speak, press again — your words are typed at the cursor in any application.
+Global voice-to-keyboard for Linux. Press a hotkey, speak, press again — your words are typed at the cursor in any application.
 
 Powered by [OpenAI Whisper](https://openai.com/research/whisper). No local model download required.
+
+> **Platform support:** Tested on Linux (PulseAudio). macOS is untested but may work. Windows is not supported (PortAudio setup is complex without conda).
 
 ---
 
@@ -14,40 +16,42 @@ F9 pressed  →  audio alert (stop)   →  audio sent to Whisper API
                                     →  transcription typed at cursor
 ```
 
+Recordings auto-stop after 10 minutes and transcribe automatically.
+
 ---
 
 ## Installation
 
 ### Prerequisites
 
-- [Miniconda or Anaconda](https://docs.conda.io/en/latest/miniconda.html)
 - An [OpenAI API key](https://platform.openai.com/api-keys)
 
-### 1. Clone and create the environment
+### Option A — Conda (recommended)
+
+Conda handles the PortAudio system dependency automatically.
 
 ```bash
-git clone https://github.com/your-org/whisper-dictate.git
+git clone https://github.com/ignacio-ferreira-dev/whisper-dictate.git
 cd whisper-dictate
 
-# Create the conda environment from environment.yml (includes PyAudio + all deps)
 conda env create -f environment.yml
-
-# Activate it
 conda activate whisper-dictate
-```
-
-> `environment.yml` installs PyAudio via `conda-forge`, which automatically handles
-> the PortAudio system dependency on Linux, macOS, and Windows.
-
-### 2. Install the package in editable mode
-
-```bash
 pip install -e .
 ```
 
-This registers the `whisper-dictate` command and lets you edit source files without reinstalling.
+### Option B — pip (requires PortAudio on the system)
 
-### 3. Configure your API key
+```bash
+# Linux
+sudo apt install portaudio19-dev
+pip install whisper-dictate
+
+# macOS (untested)
+brew install portaudio
+pip install whisper-dictate
+```
+
+### Configure your API key
 
 ```bash
 cp .env.example .env
@@ -61,7 +65,7 @@ OPENAI_API_KEY=sk-your_actual_key_here
 
 > **Never commit `.env` to version control.** It is listed in `.gitignore`.
 
-### Updating the environment
+### Updating the conda environment
 
 If `environment.yml` changes after a `git pull`:
 
@@ -83,6 +87,8 @@ whisper-dictate
 | `F9` | Start recording (plays a start beep) |
 | `F9` again | Stop recording, transcribe, type at cursor |
 | `ESC` | Quit |
+
+Recordings stop automatically after 10 minutes and are transcribed immediately — no need to press F9 again.
 
 ### Options
 
@@ -161,13 +167,24 @@ All settings can be set in `.env` (copy from `.env.example`) or as environment v
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OPENAI_API_KEY` | *(required)* | Your OpenAI API key |
-| `TRANSCRIPTION_BACKEND` | `openai` | Backend to use for transcription |
 | `WHISPER_MODEL` | `whisper-1` | OpenAI Whisper model |
 | `DEFAULT_LANGUAGE` | `auto` | ISO 639-1 code or `auto` |
-| `ENABLE_TRANSLATION` | `false` | Always translate output to English |
 | `SAMPLE_RATE` | `16000` | Microphone sample rate in Hz |
 | `ALERT_VOLUME` | `0.8` | Alert sound volume (0.0–1.0) |
 | `ALERTS_ENABLED` | `true` | Enable/disable audio alerts |
+
+---
+
+## Publishing to PyPI
+
+```bash
+conda activate whisper-dictate
+pip install build twine
+python -m build
+twine upload dist/*
+```
+
+Requires a [PyPI](https://pypi.org) account and an API token.
 
 ---
 
