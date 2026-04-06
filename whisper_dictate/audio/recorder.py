@@ -130,6 +130,14 @@ class AudioRecorder:
             self._log("Audio not initialized - call setup() first")
             return False
 
+        # Play the alert BEFORE opening the PyAudio stream.
+        # Opening a PortAudio input stream while pygame/SDL is also accessing
+        # the audio subsystem from a background thread causes heap corruption
+        # (malloc crash) on Linux. Playing first ensures pygame finishes before
+        # PortAudio acquires the device.
+        self.alerts.play_start()
+        time.sleep(0.15)  # let the alert thread start before PortAudio opens
+
         try:
             self._stream = self._pa.open(
                 format=self.FORMAT,
@@ -141,7 +149,6 @@ class AudioRecorder:
             )
             self._buffer = []
             self._recording = True
-            self.alerts.play_start()
             self._log("Recording started - press hotkey again to stop")
             self._record_thread = threading.Thread(
                 target=self._capture_loop, daemon=True
