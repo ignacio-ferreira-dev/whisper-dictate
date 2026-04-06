@@ -161,4 +161,7 @@ cython_debug/
 .idea/
 .vscode/
 
+# Temporary test files
+# temp_tests/ tracked intentionally (implementation plan tests)
+
 nohup.out
