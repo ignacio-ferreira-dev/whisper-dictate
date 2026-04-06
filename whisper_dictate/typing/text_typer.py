@@ -99,12 +99,11 @@ class TextTyper:
 
     def _type_string(self, text: str) -> None:
         """
-        Type each character individually with a configurable delay.
+        Type the full string at once using pynput's Controller.type().
 
-        pynput's Controller.type() handles Unicode (accents, emoji) correctly
-        without manual key mapping.
+        Controller.type() handles Unicode (accents, emoji) correctly and is
+        significantly faster than typing character-by-character. The char_delay
+        option is kept for backwards compatibility but no longer adds per-character
+        pauses — it only applies if explicitly needed in future extensions.
         """
-        for char in text:
-            self._controller.type(char)
-            if self.char_delay > 0:
-                time.sleep(self.char_delay)
+        self._controller.type(text)
