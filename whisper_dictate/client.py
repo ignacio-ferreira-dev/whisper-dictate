@@ -72,6 +72,7 @@ class WhisperDictateClient:
 
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._should_quit: bool = False
+        self._transcribing: bool = False
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -110,6 +111,8 @@ class WhisperDictateClient:
         """Handle key press events from pynput (runs in a background thread)."""
         try:
             if key == self._hotkey:
+                if self._transcribing:
+                    return  # ignore hotkey while transcription is in progress
                 asyncio.run_coroutine_threadsafe(
                     self._toggle_recording(), self._loop
                 )
@@ -166,6 +169,7 @@ class WhisperDictateClient:
             return
 
         self._log("Transcribing...")
+        self._transcribing = True
 
         try:
             text = await self._backend.transcribe(
@@ -177,6 +181,8 @@ class WhisperDictateClient:
             self._log(f"Transcription error: {e}")
             self._alerts.play_error()
             return
+        finally:
+            self._transcribing = False
 
         if not text or not text.strip():
             self._log("No speech detected")

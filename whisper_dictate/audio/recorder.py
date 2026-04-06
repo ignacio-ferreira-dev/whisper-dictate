@@ -206,25 +206,32 @@ class AudioRecorder:
     # ------------------------------------------------------------------
 
     def _capture_loop(self) -> None:
-        """Background thread: reads chunks from the stream into the buffer."""
+        """
+        Background thread: reads chunks from the stream into the buffer.
+
+        PortAudio writes ALSA/Jack probe errors directly to stderr (C level),
+        so we redirect fd 2 to /dev/null for the duration of the capture loop.
+        Python-level output (our _log calls) is on stdout and is unaffected.
+        """
         auto_stopped = False
-        while self._recording and self._stream:
-            if self.get_duration() >= self.MAX_RECORDING_SECONDS:
-                self._log(
-                    f"Maximum recording duration reached "
-                    f"({self.MAX_RECORDING_SECONDS // 60} min) — stopping and transcribing"
-                )
-                self._stop_stream()
-                auto_stopped = True
-                break
-            try:
-                chunk = self._stream.read(self.CHUNK_SIZE, exception_on_overflow=False)
-                self._buffer.append(chunk)
-            except Exception as e:
-                self._log(f"Capture error: {e}")
-                self._stop_stream()  # close stream cleanly to avoid heap corruption
-                auto_stopped = True
-                break
+        with _suppress_alsa_errors():
+            while self._recording and self._stream:
+                if self.get_duration() >= self.MAX_RECORDING_SECONDS:
+                    self._log(
+                        f"Maximum recording duration reached "
+                        f"({self.MAX_RECORDING_SECONDS // 60} min) — stopping and transcribing"
+                    )
+                    self._stop_stream()
+                    auto_stopped = True
+                    break
+                try:
+                    chunk = self._stream.read(self.CHUNK_SIZE, exception_on_overflow=False)
+                    self._buffer.append(chunk)
+                except Exception as e:
+                    self._log(f"Capture error: {e}")
+                    self._stop_stream()  # close stream cleanly to avoid heap corruption
+                    auto_stopped = True
+                    break
 
         if auto_stopped and self._on_auto_stop:
             self.alerts.play_stop()
