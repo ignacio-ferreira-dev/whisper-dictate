@@ -10,7 +10,7 @@ import pyaudio
 import websockets
 
 
-async def start_transcription(url="ws://0.0.0.0:8181/ws"):
+async def start_transcription(url="ws://localhost:8181/ws"):
     """stream mic audio to server"""
     async with websockets.connect(url) as websocket:
         result = []

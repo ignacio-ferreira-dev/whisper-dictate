@@ -161,6 +161,9 @@ cython_debug/
 .idea/
 .vscode/
 
+# Cursor IDE local config (rules, settings, transcripts — all local only)
+.cursor/
+
 # Temporary test/exploration files (not part of the formal test suite)
 temp_tests/
 

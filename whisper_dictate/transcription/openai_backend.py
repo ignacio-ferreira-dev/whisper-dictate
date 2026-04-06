@@ -12,10 +12,14 @@ import tempfile
 import wave
 from typing import Optional
 
-import pyaudio
 from openai import AsyncOpenAI
 
 from whisper_dictate.transcription.base import TranscriptionBackend
+
+# paInt16 = 16-bit signed integer = 2 bytes per sample. This is a constant;
+# instantiating PyAudio just to query it caused a malloc crash when a second
+# PyAudio context was created while the recorder's context was still alive.
+_INT16_SAMPLE_WIDTH = 2
 
 
 class OpenAIWhisperBackend(TranscriptionBackend):
@@ -70,20 +74,18 @@ class OpenAIWhisperBackend(TranscriptionBackend):
         Write PCM frames to a temporary WAV file and return the file path.
 
         Args:
-            frames:      List of raw PCM byte chunks.
+            frames:      List of raw PCM byte chunks (paInt16, mono).
             sample_rate: Audio sample rate in Hz.
 
         Returns:
             Path to the temporary WAV file.
         """
-        sample_width = self._get_sample_width()
-
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
             tmp_path = f.name
 
         with wave.open(tmp_path, "wb") as wf:
             wf.setnchannels(1)
-            wf.setsampwidth(sample_width)
+            wf.setsampwidth(_INT16_SAMPLE_WIDTH)
             wf.setframerate(sample_rate)
             wf.writeframes(b"".join(frames))
 
@@ -113,11 +115,3 @@ class OpenAIWhisperBackend(TranscriptionBackend):
 
         return result.strip() if isinstance(result, str) else str(result).strip()
 
-    @staticmethod
-    def _get_sample_width() -> int:
-        """Return the byte width for paInt16 audio format."""
-        pa = pyaudio.PyAudio()
-        try:
-            return pa.get_sample_size(pyaudio.paInt16)
-        finally:
-            pa.terminate()

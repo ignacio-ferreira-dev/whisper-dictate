@@ -13,11 +13,31 @@ Usage:
     recorder.teardown()
 """
 
+import contextlib
+import os
 import threading
 import time
 from typing import List, Optional
 
 import pyaudio
+
+
+@contextlib.contextmanager
+def _suppress_alsa_errors():
+    """
+    Silence the ALSA/Jack error messages that PortAudio prints to stderr
+    when probing unavailable audio devices during PyAudio initialisation.
+    These are harmless — PyAudio falls back to PulseAudio automatically.
+    """
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    old_stderr = os.dup(2)
+    os.dup2(devnull, 2)
+    os.close(devnull)
+    try:
+        yield
+    finally:
+        os.dup2(old_stderr, 2)
+        os.close(old_stderr)
 
 from whisper_dictate.audio.alerts import AudioAlertsManager
 
@@ -68,7 +88,8 @@ class AudioRecorder:
         Returns:
             True on success, False if no usable device is found.
         """
-        self._pa = pyaudio.PyAudio()
+        with _suppress_alsa_errors():
+            self._pa = pyaudio.PyAudio()
         if not self._find_working_device():
             self._pa.terminate()
             self._pa = None

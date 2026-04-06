@@ -25,9 +25,6 @@ import threading
 import time
 from typing import List, Optional
 
-import numpy as np
-import pyaudio
-
 
 _SOUNDS_DIR = os.path.join(os.path.dirname(__file__), "..", "sounds")
 
@@ -40,20 +37,22 @@ class AudioAlertsManager:
     """
     Manages audible feedback for recording state changes.
 
-    Tries to play the custom MP3 files via pygame.mixer first.
-    Falls back to synthesized sine-wave tones if pygame is unavailable
-    or the file is missing. Every play call is non-blocking (daemon thread).
+    Uses pygame.mixer for MP3 playback exclusively. PyAudio is intentionally
+    NOT used here — creating a second PyAudio instance while the recorder's
+    instance is alive causes heap corruption (malloc crash) on Linux.
+
+    Sound files live in whisper_dictate/sounds/:
+        recording_start.mp3           -> play_start()
+        recording_end.mp3             -> play_stop()
+        transcription_end_success.mp3 -> play_done()
+        transcription_end_error.mp3   -> play_error()
     """
 
-    _SAMPLE_RATE: int = 44100
-    _FORMAT = pyaudio.paFloat32
-    _CHANNELS: int = 1
-
     _SOUND_MAP = {
-        "start": ("recording_start.mp3",           [(880, 0.08), (1320, 0.12)]),
-        "stop":  ("recording_end.mp3",              [(660, 0.15)]),
-        "done":  ("transcription_end_success.mp3",  [(880, 0.10), (1100, 0.14)]),
-        "error": ("transcription_end_error.mp3",    [(220, 0.10), (180, 0.10)]),
+        "start": "recording_start.mp3",
+        "stop":  "recording_end.mp3",
+        "done":  "transcription_end_success.mp3",
+        "error": "transcription_end_error.mp3",
     }
 
     def __init__(self, volume: float = 0.8, enabled: bool = True):
@@ -97,14 +96,14 @@ class AudioAlertsManager:
         threading.Thread(target=self._play_event, args=(event,), daemon=True).start()
 
     def _play_event(self, event: str) -> None:
-        """Play a sound file or fall back to a synthesized tone."""
-        filename, fallback_tones = self._SOUND_MAP[event]
+        """Play the sound file for the given event via pygame."""
+        if not self._pygame_ok:
+            return
+        filename = self._SOUND_MAP[event]
         path = _sound_path(filename)
-
-        if self._pygame_ok and os.path.isfile(path):
-            self._play_file(path)
-        else:
-            self._play_tones(fallback_tones)
+        if not os.path.isfile(path):
+            return
+        self._play_file(path)
 
     def _play_file(self, path: str) -> None:
         """Play an audio file using pygame.mixer (supports MP3 and WAV)."""
@@ -117,50 +116,6 @@ class AudioAlertsManager:
                 time.sleep(0.02)
         except Exception:
             pass
-
-    def _play_tones(self, tones: List[tuple], gap: float = 0.02) -> None:
-        """Synthesize and play a list of (frequency_hz, duration_s) tones."""
-        pa = pyaudio.PyAudio()
-        try:
-            output_device = self._find_output_device(pa)
-            stream = pa.open(
-                format=self._FORMAT,
-                channels=self._CHANNELS,
-                rate=self._SAMPLE_RATE,
-                output=True,
-                output_device_index=output_device,
-            )
-            for idx, (freq, duration) in enumerate(tones):
-                stream.write(self._generate_tone(freq, duration).tobytes())
-                if gap > 0 and idx < len(tones) - 1:
-                    time.sleep(gap)
-            stream.stop_stream()
-            stream.close()
-        except Exception:
-            pass
-        finally:
-            pa.terminate()
-
-    def _generate_tone(self, frequency: float, duration: float) -> np.ndarray:
-        """Generate a sine-wave tone with fade-in/out envelope."""
-        n = int(self._SAMPLE_RATE * duration)
-        t = np.linspace(0, duration, n, endpoint=False, dtype=np.float32)
-        wave = np.sin(2 * np.pi * frequency * t).astype(np.float32)
-        fade = min(int(self._SAMPLE_RATE * 0.01), n // 4)
-        if fade > 0:
-            wave[:fade] *= np.linspace(0, 1, fade, dtype=np.float32)
-            wave[-fade:] *= np.linspace(1, 0, fade, dtype=np.float32)
-        return (wave * self.volume).astype(np.float32)
-
-    @staticmethod
-    def _find_output_device(pa: pyaudio.PyAudio) -> Optional[int]:
-        """Return the index of a pulse/default output device, or None."""
-        for i in range(pa.get_device_count()):
-            info = pa.get_device_info_by_index(i)
-            name = info["name"].lower()
-            if info["maxOutputChannels"] > 0 and ("pulse" in name or "default" in name):
-                return i
-        return None
 
     @staticmethod
     def _init_pygame() -> bool:
