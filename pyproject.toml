@@ -1,0 +1,72 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "whisper_dictate"
+version = "0.1.0"
+description = "Global voice-to-keyboard using OpenAI Whisper: press a hotkey, speak, and the transcription is typed at your cursor."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "whisper-dictate contributors" }]
+keywords = ["whisper", "speech-to-text", "dictation", "voice", "keyboard", "openai"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+
+dependencies = [
+    "openai>=1.50.0",
+    "pyaudio>=0.2.14",
+    "pynput>=1.7.0",
+    "numpy>=1.24.0",
+    "pygame>=2.5.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.3.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "pytest-timeout>=2.3.0",
+    "black>=23.0.0",
+    "pylint>=2.17.0",
+]
+server = [
+    "fastapi>=0.108.0",
+    "uvicorn[standard]>=0.30.0",
+    "python-multipart>=0.0.9",
+    "websocket-client>=1.8.0",
+]
+
+[project.scripts]
+whisper-dictate = "whisper_dictate.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["whisper_dictate*"]
+
+[tool.setuptools.package-data]
+whisper_dictate = ["sounds/*.mp3", "sounds/*.wav"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+timeout = 30
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311"]
+
+[tool.pylint.messages_control]
+disable = ["C0114", "R0903"]

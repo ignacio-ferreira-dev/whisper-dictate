@@ -161,7 +161,10 @@ cython_debug/
 .idea/
 .vscode/
 
-# Temporary test files
-# temp_tests/ tracked intentionally (implementation plan tests)
+# Temporary test/exploration files (not part of the formal test suite)
+temp_tests/
+
+# Local audio test recordings
+*.wav
 
 nohup.out
