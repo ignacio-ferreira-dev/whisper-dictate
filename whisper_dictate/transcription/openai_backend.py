@@ -83,7 +83,7 @@ class OpenAIWhisperBackend(TranscriptionBackend):
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
             tmp_path = f.name
 
-        with wave.open(tmp_path, "wb") as wf:
+        with wave.open(tmp_path, "wb") as wf:  # pylint: disable=no-member
             wf.setnchannels(1)
             wf.setsampwidth(_INT16_SAMPLE_WIDTH)
             wf.setframerate(sample_rate)

@@ -3,8 +3,7 @@ Audio Alerts Manager
 ====================
 
 Plays sound files to signal recording state changes.
-Uses pygame.mixer for MP3/WAV playback with a numpy+pyaudio sine-wave
-fallback when the sound files are not found.
+Uses pygame.mixer for MP3/WAV playback.
 
 Sound files live in whisper_dictate/sounds/:
     recording_start.mp3           -> play_start()
@@ -23,7 +22,6 @@ Usage:
 import os
 import threading
 import time
-from typing import List, Optional
 
 
 _SOUNDS_DIR = os.path.join(os.path.dirname(__file__), "..", "sounds")

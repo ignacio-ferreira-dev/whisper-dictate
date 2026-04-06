@@ -34,9 +34,14 @@ def typer(mock_controller):
     return t
 
 
-def typed_chars(mock_controller) -> list:
-    """Return the list of characters passed to Controller.type()."""
+def typed_strings(mock_controller) -> list:
+    """Return the list of strings passed to Controller.type() in call order."""
     return [c.args[0] for c in mock_controller.type.call_args_list]
+
+
+def typed_text(mock_controller) -> str:
+    """Return all text typed via Controller.type() concatenated."""
+    return "".join(typed_strings(mock_controller))
 
 
 # ---------------------------------------------------------------------------
@@ -67,34 +72,39 @@ class TestTextTyperDefaults:
 
 
 class TestTypeText:
-    """type_text() sends the correct character sequence to the Controller."""
+    """type_text() sends the correct text to the Controller in one call."""
 
     def test_simple_ascii_string(self, typer, mock_controller):
         result = typer.type_text("hello", delay_before_typing=0.0)
         assert result is True
-        assert typed_chars(mock_controller) == list("hello")
+        assert typed_text(mock_controller) == "hello"
 
     def test_unicode_accented_characters(self, typer, mock_controller):
         text = "hola niño"
         typer.type_text(text, delay_before_typing=0.0)
-        assert typed_chars(mock_controller) == list(text)
+        assert typed_text(mock_controller) == text
 
     def test_mixed_case_string(self, typer, mock_controller):
         typer.type_text("Hello World", delay_before_typing=0.0)
-        assert typed_chars(mock_controller) == list("Hello World")
+        assert typed_text(mock_controller) == "Hello World"
 
     def test_string_with_punctuation(self, typer, mock_controller):
         text = "Hi, how are you?"
         typer.type_text(text, delay_before_typing=0.0)
-        assert typed_chars(mock_controller) == list(text)
+        assert typed_text(mock_controller) == text
 
     def test_leading_trailing_whitespace_is_stripped(self, typer, mock_controller):
         typer.type_text("  hi  ", delay_before_typing=0.0)
-        assert typed_chars(mock_controller) == list("hi")
+        assert typed_text(mock_controller) == "hi"
 
     def test_returns_true_on_success(self, typer):
         result = typer.type_text("ok", delay_before_typing=0.0)
         assert result is True
+
+    def test_types_in_single_call(self, typer, mock_controller):
+        """Text must be injected in one Controller.type() call, not char by char."""
+        typer.type_text("hello world", delay_before_typing=0.0)
+        assert mock_controller.type.call_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -107,17 +117,17 @@ class TestSpacePrepending:
 
     def test_add_space_kwarg_prepends_space(self, typer, mock_controller):
         typer.type_text("hi", add_space=True, delay_before_typing=0.0)
-        chars = typed_chars(mock_controller)
-        assert chars[0] == " "
-        assert chars[1:] == list("hi")
+        # space is typed as a separate Controller.type(" ") call first
+        calls = typed_strings(mock_controller)
+        assert calls[0] == " "
+        assert "".join(calls[1:]) == "hi"
 
     def test_instance_default_add_space_before(self, mock_controller):
         with patch("whisper_dictate.typing.text_typer.Controller", return_value=mock_controller):
             t = TextTyper(char_delay=0.0, add_space_before=True)
             t._controller = mock_controller
         t.type_text("hi", delay_before_typing=0.0)
-        chars = typed_chars(mock_controller)
-        assert chars[0] == " "
+        assert typed_strings(mock_controller)[0] == " "
 
     def test_kwarg_overrides_instance_default(self, mock_controller):
         """add_space=False overrides an instance default of True."""
@@ -125,8 +135,7 @@ class TestSpacePrepending:
             t = TextTyper(char_delay=0.0, add_space_before=True)
             t._controller = mock_controller
         t.type_text("hi", add_space=False, delay_before_typing=0.0)
-        chars = typed_chars(mock_controller)
-        assert chars[0] != " "
+        assert typed_strings(mock_controller)[0] != " "
 
 
 # ---------------------------------------------------------------------------
@@ -156,8 +165,7 @@ class TestTypeTextWithNewline:
 
     def test_sends_enter_after_text(self, typer, mock_controller):
         typer.type_text_with_newline("done")
-        chars = typed_chars(mock_controller)
-        assert chars == list("done")
+        assert typed_text(mock_controller) == "done"
         pressed = [c.args[0] for c in mock_controller.press.call_args_list]
         assert Key.enter in pressed
 
