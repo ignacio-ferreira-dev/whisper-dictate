@@ -14,8 +14,6 @@ dependencies:
   - pip:
       - openai>=1.50.0
       - pynput>=1.7.0
-      - numpy>=1.24.0
-      - pygame>=2.5.0
       - python-dotenv>=1.0.0
       # Dev tools
       - pytest>=7.3.0

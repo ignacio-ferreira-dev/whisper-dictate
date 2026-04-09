@@ -1,15 +1,14 @@
 """
 Unit tests for whisper_dictate.audio.alerts.AudioAlertsManager.
 
-pygame and PyAudio are mocked so no real audio hardware is required.
-Tests verify the internal routing logic (file vs fallback), volume clamping,
+subprocess.run is patched so no real audio hardware is required.
+Tests verify the internal routing logic, volume clamping,
 enabled/disabled behaviour, and the sound-file path resolution.
 """
 
 import os
-import threading
 import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import patch
 
 from whisper_dictate.audio.alerts import AudioAlertsManager, _sound_path
 
@@ -78,11 +77,7 @@ class TestDisabledMode:
 
 
 class TestSoundFileRouting:
-    """_play_event() uses the MP3 file when pygame is available and the file exists."""
-
-    def _alerts_with_mocked_pygame(self) -> AudioAlertsManager:
-        with patch("whisper_dictate.audio.alerts.AudioAlertsManager._init_pygame", return_value=True):
-            return AudioAlertsManager(volume=0.5)
+    """_play_event() plays the correct MP3 file via subprocess."""
 
     @pytest.mark.parametrize("event,filename", [
         ("start", "recording_start.mp3"),
@@ -91,7 +86,7 @@ class TestSoundFileRouting:
         ("error", "transcription_end_error.mp3"),
     ])
     def test_uses_correct_sound_file_per_event(self, event, filename):
-        a = self._alerts_with_mocked_pygame()
+        a = AudioAlertsManager(volume=0.5)
         with patch.object(a, "_play_file") as mock_play_file, \
              patch("os.path.isfile", return_value=True):
             a._play_event(event)
@@ -100,20 +95,20 @@ class TestSoundFileRouting:
 
     def test_does_nothing_when_file_missing(self):
         """When the sound file doesn't exist, _play_event returns silently."""
-        a = self._alerts_with_mocked_pygame()
+        a = AudioAlertsManager(volume=0.5)
         with patch.object(a, "_play_file") as mock_play_file, \
              patch("os.path.isfile", return_value=False):
             a._play_event("start")
             mock_play_file.assert_not_called()
 
-    def test_does_nothing_when_pygame_unavailable(self):
-        """When pygame failed to init, _play_event returns silently."""
-        with patch("whisper_dictate.audio.alerts.AudioAlertsManager._init_pygame", return_value=False):
-            a = AudioAlertsManager(volume=0.5)
-        with patch.object(a, "_play_file") as mock_play_file, \
-             patch("os.path.isfile", return_value=True):
-            a._play_event("start")
-            mock_play_file.assert_not_called()
+    def test_play_file_calls_subprocess(self):
+        """_play_file uses subprocess.run to invoke the system player."""
+        a = AudioAlertsManager(volume=0.5)
+        with patch("whisper_dictate.audio.alerts.subprocess.run") as mock_run:
+            a._play_file("/tmp/fake.mp3")
+            mock_run.assert_called_once()
+            cmd = mock_run.call_args[0][0]
+            assert "/tmp/fake.mp3" in cmd
 
 
 # ---------------------------------------------------------------------------
