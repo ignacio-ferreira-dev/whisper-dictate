@@ -89,24 +89,35 @@ class AudioAlertsManager:
     # ------------------------------------------------------------------
 
     def play_start(self) -> None:
-        """Play the recording-start sound."""
-        self._play_async("start")
+        """
+        Play the recording-start sound synchronously.
+
+        Blocks until the subprocess finishes so that PyAudio does not open
+        the capture stream while the audio player is still running.
+        """
+        self._play_sync("start")
 
     def play_stop(self) -> None:
-        """Play the recording-end sound."""
+        """Play the recording-end sound asynchronously."""
         self._play_async("stop")
 
     def play_done(self) -> None:
-        """Play the transcription-success sound."""
+        """Play the transcription-success sound asynchronously."""
         self._play_async("done")
 
     def play_error(self) -> None:
-        """Play the error sound."""
+        """Play the error sound asynchronously."""
         self._play_async("error")
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _play_sync(self, event: str) -> None:
+        """Play a sound and block until the subprocess finishes."""
+        if not self.enabled or not _PLAYER_CMD:
+            return
+        self._play_event(event)
 
     def _play_async(self, event: str) -> None:
         """Spawn a daemon thread so playback never blocks the caller."""

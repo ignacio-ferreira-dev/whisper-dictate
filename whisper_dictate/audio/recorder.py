@@ -174,11 +174,14 @@ class AudioRecorder:
             return []
 
         self._stop_stream()
-        self.alerts.play_stop()
 
         if self._record_thread:
             self._record_thread.join(timeout=2.0)
             self._record_thread = None
+
+        # Play stop alert only after the stream is fully closed and the
+        # capture thread has exited — avoids any overlap with PyAudio.
+        self.alerts.play_stop()
 
         frames = list(self._buffer)
         self._buffer = []
@@ -237,7 +240,7 @@ class AudioRecorder:
                     break
 
         if auto_stopped and self._on_auto_stop:
-            self.alerts.play_stop()
+            self.alerts.play_stop()  # stream is already closed here
             self._on_auto_stop()
 
     def _stop_stream(self) -> None:
