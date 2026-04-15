@@ -5,6 +5,11 @@ Audio Recorder
 Captures microphone input into an in-memory buffer.
 Designed to be controlled by an external hotkey manager.
 
+The PyAudio stream is opened once during setup() and kept alive for the
+entire session. start_recording() / stop_recording() only toggle capture
+without touching the stream — this avoids the PortAudio heap corruption
+that occurs when repeatedly opening and closing streams on Linux/PulseAudio.
+
 Usage:
     recorder = AudioRecorder()
     recorder.setup()
@@ -20,6 +25,8 @@ import time
 from typing import Callable, List, Optional
 
 import pyaudio
+
+from whisper_dictate.audio.alerts import AudioAlertsManager
 
 
 @contextlib.contextmanager
@@ -39,12 +46,14 @@ def _suppress_alsa_errors():
         os.dup2(old_stderr, 2)
         os.close(old_stderr)
 
-from whisper_dictate.audio.alerts import AudioAlertsManager
-
 
 class AudioRecorder:
     """
     Manages microphone capture with start/stop control.
+
+    The PyAudio stream is opened once and kept alive to avoid PortAudio
+    heap corruption from repeated open/close cycles on Linux/PulseAudio.
+    Capture is controlled by a flag read by the background thread.
 
     Audio data is accumulated as a list of raw PCM byte chunks
     (paInt16, mono) ready to be passed to a TranscriptionBackend.
@@ -79,7 +88,7 @@ class AudioRecorder:
         self._stream: Optional[pyaudio.Stream] = None
         self._buffer: List[bytes] = []
         self._recording: bool = False
-        self._record_thread: Optional[threading.Thread] = None
+        self._capture_thread: Optional[threading.Thread] = None
 
         self.sample_rate: Optional[int] = None
         self.device_index: Optional[int] = None
@@ -90,23 +99,52 @@ class AudioRecorder:
 
     def setup(self) -> bool:
         """
-        Initialize PyAudio and discover a working input device.
+        Initialize PyAudio, find a working device, and open the stream once.
+
+        The stream stays open for the entire session to avoid PortAudio
+        heap corruption from repeated open/close cycles.
 
         Returns:
             True on success, False if no usable device is found.
         """
         with _suppress_alsa_errors():
             self._pa = pyaudio.PyAudio()
+
         if not self._find_working_device():
             self._pa.terminate()
             self._pa = None
             return False
+
+        try:
+            with _suppress_alsa_errors():
+                self._stream = self._pa.open(
+                    format=self.FORMAT,
+                    channels=self.CHANNELS,
+                    rate=self.sample_rate,
+                    input=True,
+                    input_device_index=self.device_index,
+                    frames_per_buffer=self.CHUNK_SIZE,
+                    stream_callback=self._stream_callback,
+                    start=False,
+                )
+        except Exception as e:
+            self._log(f"Failed to open audio stream: {e}")
+            self._pa.terminate()
+            self._pa = None
+            return False
+
         return True
 
     def teardown(self) -> None:
         """Release all PyAudio resources."""
-        if self._recording:
-            self._stop_stream()
+        self._recording = False
+        if self._stream:
+            try:
+                self._stream.stop_stream()
+                self._stream.close()
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass
+            self._stream = None
         if self._pa:
             self._pa.terminate()
             self._pa = None
@@ -119,52 +157,45 @@ class AudioRecorder:
         """
         Begin capturing audio from the microphone.
 
-        Plays a start alert and launches a background capture thread.
+        Starts the persistent stream (if not already running) and sets the
+        capture flag. Plays a start alert synchronously first.
 
         Returns:
             True if recording started successfully.
         """
         if self._recording:
             return False
-        if not self._pa or self.device_index is None:
+        if not self._stream:
             self._log("Audio not initialized - call setup() first")
             return False
 
-        # Play the alert before opening the stream. The alert now runs via
-        # subprocess (paplay/aplay) so there is no shared memory with PyAudio.
-        self.alerts.play_start()
+        self.alerts.play_start()  # blocking — finishes before stream starts
+
+        self._buffer = []
+        self._recording = True
 
         try:
-            self._stream = self._pa.open(
-                format=self.FORMAT,
-                channels=self.CHANNELS,
-                rate=self.sample_rate,
-                input=True,
-                input_device_index=self.device_index,
-                frames_per_buffer=self.CHUNK_SIZE,
-            )
-            self._buffer = []
-            self._recording = True
-            self._log("Recording started - press hotkey again to stop")
-            self._record_thread = threading.Thread(
-                target=self._capture_loop, daemon=True
-            )
-            self._record_thread.start()
-            return True
+            self._stream.start_stream()
         except Exception as e:
-            self._log(f"Failed to start recording: {e}")
+            self._log(f"Failed to start stream: {e}")
+            self._recording = False
             self.alerts.play_error()
             return False
+
+        self._log("Recording started - press hotkey again to stop")
+
+        # Watchdog thread: monitors duration limit and stream errors
+        self._capture_thread = threading.Thread(
+            target=self._watchdog_loop, daemon=True
+        )
+        self._capture_thread.start()
+        return True
 
     def stop_recording(self) -> List[bytes]:
         """
         Stop audio capture and return the recorded PCM frames.
 
-        Safe to call even if the capture loop already stopped itself (e.g. due
-        to a stream error or hitting the max duration limit). In that case the
-        buffered frames are still returned for transcription.
-
-        Plays a stop alert and waits for the capture thread to finish.
+        Safe to call even if the capture stopped automatically.
 
         Returns:
             List of raw PCM byte chunks. Empty list if nothing was recorded.
@@ -173,20 +204,24 @@ class AudioRecorder:
         if not self._recording and not has_frames:
             return []
 
-        self._stop_stream()
+        self._recording = False
 
-        if self._record_thread:
-            self._record_thread.join(timeout=2.0)
-            self._record_thread = None
+        try:
+            self._stream.stop_stream()
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
 
-        # Play stop alert only after the stream is fully closed and the
-        # capture thread has exited — avoids any overlap with PyAudio.
+        if self._capture_thread:
+            self._capture_thread.join(timeout=2.0)
+            self._capture_thread = None
+
         self.alerts.play_stop()
 
         frames = list(self._buffer)
         self._buffer = []
         if not frames:
             return []
+
         duration = len(frames) * self.CHUNK_SIZE / self.sample_rate
         self._log(f"Recording stopped - {duration:.1f}s captured ({len(frames)} chunks)")
         return frames
@@ -211,48 +246,40 @@ class AudioRecorder:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _capture_loop(self) -> None:
+    def _stream_callback(self, in_data, frame_count, time_info, status):  # pylint: disable=unused-argument
         """
-        Background thread: reads chunks from the stream into the buffer.
+        PyAudio callback: called from PortAudio's audio thread for each chunk.
+        Appends data to the buffer only while _recording is True.
+        """
+        if self._recording:
+            self._buffer.append(in_data)
+        return (None, pyaudio.paContinue)
 
-        PortAudio writes ALSA/Jack probe errors directly to stderr (C level),
-        so we redirect fd 2 to /dev/null for the duration of the capture loop.
-        Python-level output (our _log calls) is on stdout and is unaffected.
+    def _watchdog_loop(self) -> None:
+        """
+        Background thread: monitors recording duration limit.
+        Does not read from the stream — PortAudio calls _stream_callback directly.
         """
         auto_stopped = False
-        with _suppress_alsa_errors():
-            while self._recording and self._stream:
-                if self.get_duration() >= self.MAX_RECORDING_SECONDS:
-                    self._log(
-                        f"Maximum recording duration reached "
-                        f"({self.MAX_RECORDING_SECONDS // 60} min) — stopping and transcribing"
-                    )
-                    self._stop_stream()
-                    auto_stopped = True
-                    break
+
+        while self._recording:
+            if self.get_duration() >= self.MAX_RECORDING_SECONDS:
+                self._log(
+                    f"Maximum recording duration reached "
+                    f"({self.MAX_RECORDING_SECONDS // 60} min) — stopping and transcribing"
+                )
+                self._recording = False
                 try:
-                    chunk = self._stream.read(self.CHUNK_SIZE, exception_on_overflow=False)
-                    self._buffer.append(chunk)
-                except Exception as e:
-                    self._log(f"Capture error: {e}")
-                    self._stop_stream()  # close stream cleanly to avoid heap corruption
-                    auto_stopped = True
-                    break
+                    self._stream.stop_stream()
+                except Exception:  # pylint: disable=broad-exception-caught
+                    pass
+                auto_stopped = True
+                break
+            time.sleep(0.5)
 
         if auto_stopped and self._on_auto_stop:
-            self.alerts.play_stop()  # stream is already closed here
+            self.alerts.play_stop()
             self._on_auto_stop()
-
-    def _stop_stream(self) -> None:
-        """Safely stop and close the PyAudio stream."""
-        self._recording = False
-        if self._stream:
-            try:
-                self._stream.stop_stream()
-                self._stream.close()
-            except Exception:
-                pass
-            self._stream = None
 
     def _find_working_device(self) -> bool:
         """
@@ -277,22 +304,24 @@ class AudioRecorder:
         for device_id in ordered:
             for rate in self.PREFERRED_SAMPLE_RATES:
                 try:
-                    stream = self._pa.open(
-                        format=self.FORMAT,
-                        channels=self.CHANNELS,
-                        rate=rate,
-                        input=True,
-                        input_device_index=device_id,
-                        frames_per_buffer=self.CHUNK_SIZE,
-                        start=False,
-                    )
-                    stream.close()
+                    # Test the device/rate combo with a temporary stream
+                    with _suppress_alsa_errors():
+                        test_stream = self._pa.open(
+                            format=self.FORMAT,
+                            channels=self.CHANNELS,
+                            rate=rate,
+                            input=True,
+                            input_device_index=device_id,
+                            frames_per_buffer=self.CHUNK_SIZE,
+                            start=False,
+                        )
+                    test_stream.close()
                     self.device_index = device_id
                     self.sample_rate = rate
                     name = self._pa.get_device_info_by_index(device_id)["name"]
                     self._log(f"Audio device ready: '{name}' @ {rate} Hz")
                     return True
-                except Exception:
+                except Exception:  # pylint: disable=broad-exception-caught
                     continue
 
         self._log("No working audio configuration found")
