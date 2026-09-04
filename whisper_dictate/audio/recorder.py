@@ -127,7 +127,7 @@ class AudioRecorder:
                     stream_callback=self._stream_callback,
                     start=False,
                 )
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             self._log(f"Failed to open audio stream: {e}")
             self._pa.terminate()
             self._pa = None
@@ -138,9 +138,12 @@ class AudioRecorder:
     def teardown(self) -> None:
         """Release all PyAudio resources."""
         self._recording = False
+        if self._capture_thread and self._capture_thread is not threading.current_thread():
+            self._capture_thread.join(timeout=2.0)
+        self._capture_thread = None
+        self._stop_stream()
         if self._stream:
             try:
-                self._stream.stop_stream()
                 self._stream.close()
             except Exception:  # pylint: disable=broad-exception-caught
                 pass
@@ -176,7 +179,7 @@ class AudioRecorder:
 
         try:
             self._stream.start_stream()
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             self._log(f"Failed to start stream: {e}")
             self._recording = False
             self.alerts.play_error()
@@ -205,13 +208,9 @@ class AudioRecorder:
             return []
 
         self._recording = False
+        self._stop_stream()
 
-        try:
-            self._stream.stop_stream()
-        except Exception:  # pylint: disable=broad-exception-caught
-            pass
-
-        if self._capture_thread:
+        if self._capture_thread and self._capture_thread is not threading.current_thread():
             self._capture_thread.join(timeout=2.0)
             self._capture_thread = None
 
@@ -222,7 +221,7 @@ class AudioRecorder:
         if not frames:
             return []
 
-        duration = len(frames) * self.CHUNK_SIZE / self.sample_rate
+        duration = self.frames_duration(frames)
         self._log(f"Recording stopped - {duration:.1f}s captured ({len(frames)} chunks)")
         return frames
 
@@ -238,13 +237,30 @@ class AudioRecorder:
 
     def get_duration(self) -> float:
         """Return duration in seconds of currently buffered audio."""
+        return self.frames_duration(self._buffer)
+
+    def frames_duration(self, frames: List[bytes]) -> float:
+        """
+        Return the duration in seconds represented by a list of PCM chunks.
+
+        Returns 0.0 before setup() has picked a sample rate.
+        """
         if not self.sample_rate:
             return 0.0
-        return len(self._buffer) * self.CHUNK_SIZE / self.sample_rate
+        return len(frames) * self.CHUNK_SIZE / self.sample_rate
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _stop_stream(self) -> None:
+        """Stop the capture stream, tolerating a stream that is absent or already stopped."""
+        if not self._stream:
+            return
+        try:
+            self._stream.stop_stream()
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
 
     def _stream_callback(self, in_data, frame_count, time_info, status):  # pylint: disable=unused-argument
         """
@@ -269,16 +285,15 @@ class AudioRecorder:
                     f"({self.MAX_RECORDING_SECONDS // 60} min) — stopping and transcribing"
                 )
                 self._recording = False
-                try:
-                    self._stream.stop_stream()
-                except Exception:  # pylint: disable=broad-exception-caught
-                    pass
+                self._stop_stream()
                 auto_stopped = True
                 break
             time.sleep(0.5)
 
+        # The stop sound is not played here: the callback funnels back into
+        # stop_recording(), which owns it. Playing it in both places produced
+        # a double beep on every auto-stop.
         if auto_stopped and self._on_auto_stop:
-            self.alerts.play_stop()
             self._on_auto_stop()
 
     def _find_working_device(self) -> bool:
@@ -295,11 +310,17 @@ class AudioRecorder:
             self._log("No audio input devices found")
             return False
 
-        pulse = [d for d in input_devices
-                 if "pulse" in self._pa.get_device_info_by_index(d)["name"].lower()]
-        default = [d for d in input_devices
-                   if "default" in self._pa.get_device_info_by_index(d)["name"].lower()]
-        ordered = pulse + default or input_devices
+        # Try the PulseAudio/default devices first — raw hardware devices are
+        # often busy or locked to a sample rate we cannot use.
+        def rank(device_id: int) -> int:
+            name = self._pa.get_device_info_by_index(device_id)["name"].lower()
+            if "pulse" in name:
+                return 0
+            if "default" in name:
+                return 1
+            return 2
+
+        ordered = sorted(input_devices, key=rank)
 
         for device_id in ordered:
             for rate in self.PREFERRED_SAMPLE_RATES:

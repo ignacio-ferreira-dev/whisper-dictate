@@ -1,8 +1,8 @@
 """
 Integration tests for AudioAlertsManager.
 
-These tests exercise real pygame audio output and verify that each
-alert plays to completion without raising an exception.
+These tests exercise real audio output through the system player
+subprocess and verify that each alert plays to completion without raising.
 
 Requirements: audio output device (speakers/headphones).
 
@@ -26,15 +26,16 @@ def alerts() -> AudioAlertsManager:
 
 
 class TestAudioAlertsPlayback:
-    """Each alert method completes without error and spawns a daemon thread."""
+    """Each alert method completes without error against real audio hardware."""
 
-    def test_play_start_spawns_daemon_thread(self, alerts):
-        threads_before = {t.ident for t in threading.enumerate()}
+    def test_play_start_blocks_until_playback_ends(self, alerts):
+        """
+        play_start() is synchronous so PyAudio never opens the capture stream
+        while the player subprocess is still running.
+        """
+        threads_before = set(threading.enumerate())
         alerts.play_start()
-        # Give thread a moment to start
-        time.sleep(0.05)
-        threads_after = {t.ident for t in threading.enumerate()}
-        assert threads_after != threads_before or True  # spawning is best-effort
+        assert set(threading.enumerate()) == threads_before
 
     def test_play_start_completes(self, alerts):
         alerts.play_start()
@@ -51,6 +52,12 @@ class TestAudioAlertsPlayback:
     def test_play_error_completes(self, alerts):
         alerts.play_error()
         time.sleep(1.0)
+
+    def test_play_shutdown_completes(self, alerts):
+        """The double closing beep plays synchronously, before the process exits."""
+        started = time.monotonic()
+        alerts.play_shutdown()
+        assert time.monotonic() - started > 0
 
     def test_rapid_successive_calls_do_not_crash(self, alerts):
         """Multiple alerts fired in quick succession must not raise."""

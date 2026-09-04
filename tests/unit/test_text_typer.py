@@ -13,6 +13,8 @@ from pynput.keyboard import Key
 
 from whisper_dictate.typing.text_typer import TextTyper
 
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures

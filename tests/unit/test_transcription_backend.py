@@ -19,6 +19,8 @@ from unittest.mock import AsyncMock, MagicMock, patch, call
 from whisper_dictate.transcription.base import TranscriptionBackend
 from whisper_dictate.transcription.openai_backend import OpenAIWhisperBackend
 
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # Helpers

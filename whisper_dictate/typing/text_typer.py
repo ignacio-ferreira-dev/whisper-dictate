@@ -77,7 +77,11 @@ class TextTyper:
                 time.sleep(self.char_delay)
             self._type_string(text)
             return True
-        except Exception:
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            # pynput surfaces platform errors (no X11 display, permissions)
+            # as assorted exception types; report the cause instead of
+            # failing silently, since the transcription is lost either way.
+            print(f"Warning: could not type text: {exc}")
             return False
 
     def type_text_with_newline(self, text: str) -> bool:

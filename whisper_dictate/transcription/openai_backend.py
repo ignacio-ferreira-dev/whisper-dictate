@@ -114,4 +114,3 @@ class OpenAIWhisperBackend(TranscriptionBackend):
             result = await self._client.audio.transcriptions.create(**kwargs)
 
         return result.strip() if isinstance(result, str) else str(result).strip()
-

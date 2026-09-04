@@ -10,6 +10,8 @@ from unittest.mock import patch
 
 from whisper_dictate.config import Settings, SUPPORTED_LANGUAGES
 
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # Helpers
