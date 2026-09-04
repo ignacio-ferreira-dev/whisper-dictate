@@ -1,15 +1,17 @@
 """
 Unit tests for whisper_dictate.audio.alerts.AudioAlertsManager.
 
-subprocess.run is patched so no real audio hardware is required.
+The player subprocess is patched so no real audio hardware is required.
 Tests verify the internal routing logic, volume clamping,
 enabled/disabled behaviour, and the sound-file path resolution.
 """
 
 import os
+import subprocess
+import time
+
 import pytest
-from subprocess import CompletedProcess
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from whisper_dictate.audio.alerts import AudioAlertsManager, _Player, _find_player, _sound_path
 
@@ -23,6 +25,14 @@ def _player_named(name: str) -> _Player:
 
 
 _FFPLAY = _player_named("ffplay")
+
+
+def _fake_process(returncode: int = 0, stderr: bytes = b""):
+    """A stand-in for a Popen object that finishes immediately."""
+    process = MagicMock()
+    process.communicate.return_value = (b"", stderr)
+    process.returncode = returncode
+    return process
 
 
 # ---------------------------------------------------------------------------
@@ -113,14 +123,14 @@ class TestSoundFileRouting:
             a._play_event("start")
             mock_play_file.assert_not_called()
 
-    def test_play_file_calls_subprocess(self):
-        """_play_file uses subprocess.run to invoke the system player."""
-        a = AudioAlertsManager(volume=0.5)
-        with patch("whisper_dictate.audio.alerts.subprocess.run") as mock_run:
+    def test_play_file_invokes_the_system_player(self):
+        """_play_file starts the player as a subprocess and waits for it."""
+        a = AudioAlertsManager(volume=0.5, player=_FFPLAY)
+        with patch("whisper_dictate.audio.alerts.subprocess.Popen") as mock_popen:
+            mock_popen.return_value = _fake_process()
             a._play_file("/tmp/fake.mp3")
-            mock_run.assert_called_once()
-            cmd = mock_run.call_args[0][0]
-            assert "/tmp/fake.mp3" in cmd
+            mock_popen.assert_called_once()
+            assert "/tmp/fake.mp3" in mock_popen.call_args[0][0]
 
 
 # ---------------------------------------------------------------------------
@@ -161,16 +171,52 @@ class TestSoundPathResolution:
 
 
 class TestShutdownAlert:
-    """play_shutdown() plays the stop sound twice, blocking until it finishes."""
+    """play_shutdown() plays two overlapping beeps and blocks until both end."""
 
-    def test_plays_stop_sound_twice(self):
+    def test_plays_the_stop_sound_twice(self):
         a = AudioAlertsManager(player=_FFPLAY)
-        with patch.object(a, "_play_file") as mock_play_file, \
+        with patch.object(a, "_spawn", return_value=_fake_process()) as mock_spawn, \
              patch("os.path.isfile", return_value=True):
             a.play_shutdown()
-            assert mock_play_file.call_count == AudioAlertsManager.SHUTDOWN_REPEATS
-            played = {c[0][0] for c in mock_play_file.call_args_list}
-            assert all(p.endswith("recording_end.mp3") for p in played)
+        assert mock_spawn.call_count == AudioAlertsManager.SHUTDOWN_REPEATS
+        for call_args in mock_spawn.call_args_list:
+            assert call_args[0][0][-1].endswith("recording_end.mp3")
+
+    def test_the_beeps_overlap(self, monkeypatch):
+        """
+        Every player is started before any of them is waited on, so the second
+        beep begins while the first is still sounding. Playing them back to
+        back was too easy to mistake for the ordinary stop beep.
+        """
+        monkeypatch.setattr(AudioAlertsManager, "SHUTDOWN_BEEP_OFFSET_SECONDS", 0.01)
+        a = AudioAlertsManager(player=_FFPLAY)
+        order = MagicMock()
+        with patch.object(a, "_spawn", return_value=_fake_process()) as spawn, \
+             patch.object(a, "_await") as await_, \
+             patch("os.path.isfile", return_value=True):
+            order.attach_mock(spawn, "spawn")
+            order.attach_mock(await_, "wait")
+            a.play_shutdown()
+        assert [c[0] for c in order.mock_calls] == ["spawn", "spawn", "wait", "wait"]
+
+    def test_the_second_beep_waits_for_the_offset(self, monkeypatch):
+        monkeypatch.setattr(AudioAlertsManager, "SHUTDOWN_BEEP_OFFSET_SECONDS", 0.2)
+        a = AudioAlertsManager(player=_FFPLAY)
+        with patch.object(a, "_spawn", return_value=_fake_process()), \
+             patch("os.path.isfile", return_value=True):
+            started = time.monotonic()
+            a.play_shutdown()
+            elapsed = time.monotonic() - started
+        assert elapsed >= 0.2
+
+    def test_waits_for_every_beep_to_finish(self):
+        """The process exits right after; an unawaited player would be killed."""
+        process = _fake_process()
+        a = AudioAlertsManager(player=_FFPLAY)
+        with patch.object(a, "_spawn", return_value=process), \
+             patch("os.path.isfile", return_value=True):
+            a.play_shutdown()
+        assert process.communicate.call_count == AudioAlertsManager.SHUTDOWN_REPEATS
 
     def test_does_not_spawn_a_thread(self):
         """
@@ -179,16 +225,24 @@ class TestShutdownAlert:
         """
         a = AudioAlertsManager(player=_FFPLAY)
         with patch("whisper_dictate.audio.alerts.threading.Thread") as mock_thread, \
-             patch.object(a, "_play_file"), \
+             patch.object(a, "_spawn", return_value=_fake_process()), \
              patch("os.path.isfile", return_value=True):
             a.play_shutdown()
-            mock_thread.assert_not_called()
+        mock_thread.assert_not_called()
 
     def test_is_a_no_op_when_disabled(self):
         a = AudioAlertsManager(enabled=False)
-        with patch.object(a, "_play_file") as mock_play_file:
+        with patch.object(a, "_spawn") as mock_spawn:
             a.play_shutdown()
-            mock_play_file.assert_not_called()
+        mock_spawn.assert_not_called()
+
+    def test_stops_after_a_player_fails_to_start(self):
+        """No point staggering a second beep once the first could not start."""
+        a = AudioAlertsManager(player=_FFPLAY)
+        with patch.object(a, "_spawn", return_value=None) as mock_spawn, \
+             patch("os.path.isfile", return_value=True):
+            a.play_shutdown()
+        assert mock_spawn.call_count == 1
 
     def test_reports_when_no_player_can_decode_the_format(self, capsys):
         """A missing decoder must be visible, not silent — see _warn_once."""
@@ -199,7 +253,7 @@ class TestShutdownAlert:
 
 
 # ---------------------------------------------------------------------------
-# Volume
+# Player selection
 # ---------------------------------------------------------------------------
 
 
@@ -249,14 +303,19 @@ class TestPlayerSelection:
         assert player.name == "paplay"
 
 
+# ---------------------------------------------------------------------------
+# Volume
+# ---------------------------------------------------------------------------
+
+
 class TestVolumeArguments:
     """The volume setting reaches the players that support it."""
 
     def test_ffplay_receives_percentage_volume(self):
         a = AudioAlertsManager(volume=0.5, player=_FFPLAY)
-        with patch("whisper_dictate.audio.alerts.subprocess.run") as mock_run:
+        with patch.object(a, "_spawn", return_value=_fake_process()) as mock_spawn:
             a._play_file("/tmp/fake.mp3")
-            cmd = mock_run.call_args[0][0]
+            cmd = mock_spawn.call_args[0][0]
             assert cmd == [
                 "ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet",
                 "-volume", "50", "/tmp/fake.mp3",
@@ -285,25 +344,44 @@ class TestPlaybackFailureReporting:
 
     def test_non_zero_exit_is_reported(self, capsys):
         a = AudioAlertsManager(player=_FFPLAY)
-        with patch("whisper_dictate.audio.alerts.subprocess.run",
-                   return_value=CompletedProcess([], 1, b"", b"Failed to open audio file.")):
+        with patch.object(a, "_spawn",
+                          return_value=_fake_process(1, b"Failed to open audio file.")):
             a._play_file("/tmp/fake.mp3")
         assert "Failed to open audio file." in capsys.readouterr().out
 
     def test_repeated_failures_are_reported_only_once(self, capsys):
         a = AudioAlertsManager(player=_FFPLAY)
-        with patch("whisper_dictate.audio.alerts.subprocess.run",
-                   return_value=CompletedProcess([], 1, b"", b"boom")):
+        with patch.object(a, "_spawn", return_value=_fake_process(1, b"boom")):
             a._play_file("/tmp/fake.mp3")
             a._play_file("/tmp/fake.mp3")
         assert capsys.readouterr().out.count("Warning") == 1
 
     def test_successful_playback_is_quiet(self, capsys):
         a = AudioAlertsManager(player=_FFPLAY)
-        with patch("whisper_dictate.audio.alerts.subprocess.run",
-                   return_value=CompletedProcess([], 0, b"", b"")):
+        with patch.object(a, "_spawn", return_value=_fake_process()):
             a._play_file("/tmp/fake.mp3")
         assert capsys.readouterr().out == ""
+
+    def test_a_player_that_cannot_be_started_is_reported(self, capsys):
+        a = AudioAlertsManager(player=_FFPLAY)
+        with patch("whisper_dictate.audio.alerts.subprocess.Popen",
+                   side_effect=OSError("no such file")):
+            a._play_file("/tmp/fake.mp3")
+        assert "could not be run" in capsys.readouterr().out
+
+    def test_a_hung_player_is_killed_and_reported(self, capsys):
+        a = AudioAlertsManager(player=_FFPLAY)
+        process = _fake_process()
+        process.communicate.side_effect = subprocess.TimeoutExpired("ffplay", 10)
+        with patch.object(a, "_spawn", return_value=process):
+            a._play_file("/tmp/fake.mp3")
+        process.kill.assert_called_once()
+        assert "timed out" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# Beep length
+# ---------------------------------------------------------------------------
 
 
 class TestShutdownBeepLength:
@@ -311,23 +389,20 @@ class TestShutdownBeepLength:
 
     def test_each_beep_is_trimmed(self):
         a = AudioAlertsManager(player=_FFPLAY)
-        with patch("whisper_dictate.audio.alerts.subprocess.run",
-                   return_value=CompletedProcess([], 0, b"", b"")) as mock_run, \
+        with patch.object(a, "_spawn", return_value=_fake_process()) as mock_spawn, \
              patch("os.path.isfile", return_value=True):
             a.play_shutdown()
-            for call_args in mock_run.call_args_list:
-                cmd = call_args[0][0]
-                assert "-t" in cmd
-                assert cmd[cmd.index("-t") + 1] == "0.9"
+        for call_args in mock_spawn.call_args_list:
+            cmd = call_args[0][0]
+            assert cmd[cmd.index("-t") + 1] == "0.9"
 
     def test_regular_stop_alert_is_not_trimmed(self):
         """Only the shutdown beeps are cut short; a normal stop plays in full."""
         a = AudioAlertsManager(player=_FFPLAY)
-        with patch("whisper_dictate.audio.alerts.subprocess.run",
-                   return_value=CompletedProcess([], 0, b"", b"")) as mock_run, \
+        with patch.object(a, "_spawn", return_value=_fake_process()) as mock_spawn, \
              patch("os.path.isfile", return_value=True):
             a._play_event("stop")
-            assert "-t" not in mock_run.call_args[0][0]
+        assert "-t" not in mock_spawn.call_args[0][0]
 
     def test_players_without_a_trim_flag_play_the_whole_file(self):
         """mpg123 has no seconds flag; it must still receive a valid command."""
