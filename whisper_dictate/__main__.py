@@ -10,9 +10,16 @@ import argparse
 import asyncio
 import sys
 
+from whisper_dictate.config import Settings, get_settings
 
-def build_parser() -> argparse.ArgumentParser:
-    """Return the argument parser for the whisper-dictate CLI."""
+
+def build_parser(settings: Settings) -> argparse.ArgumentParser:
+    """
+    Return the argument parser for the whisper-dictate CLI.
+
+    Defaults come from Settings so that .env values are honoured and a flag
+    passed on the command line still wins over them.
+    """
     parser = argparse.ArgumentParser(
         prog="whisper-dictate",
         description=(
@@ -23,26 +30,33 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--hotkey",
-        default="f9",
+        default=settings.hotkey,
         metavar="KEY",
         help="Pynput key name for the record toggle",
     )
     parser.add_argument(
+        "--quit-key",
+        default=settings.quit_key,
+        metavar="KEY",
+        help="Pynput key name that quits the application",
+    )
+    parser.add_argument(
         "--language",
-        default="auto",
+        default=settings.default_language,
         metavar="CODE",
         help="Whisper language code ('auto', 'es', 'en', ...)",
     )
     parser.add_argument(
         "--volume",
         type=float,
-        default=0.8,
+        default=settings.alert_volume,
         metavar="FLOAT",
         help="Alert sound volume in [0.0, 1.0]",
     )
     parser.add_argument(
         "--no-alerts",
         action="store_true",
+        default=not settings.alerts_enabled,
         help="Disable all audio alerts",
     )
     parser.add_argument(
@@ -66,15 +80,15 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-async def async_main(args: argparse.Namespace) -> int:
+async def async_main(args: argparse.Namespace, settings: Settings) -> int:
     """Async entry point: builds and runs the WhisperDictateClient."""
+    # Imported lazily: pulling in PyAudio/pynput costs noticeable startup time
+    # and must not happen for `--help` or a failed config check.
     from whisper_dictate.audio.alerts import AudioAlertsManager
     from whisper_dictate.client import WhisperDictateClient
-    from whisper_dictate.config import get_settings
     from whisper_dictate.transcription.openai_backend import OpenAIWhisperBackend
     from whisper_dictate.typing.text_typer import TextTyper
 
-    settings = get_settings()
     try:
         settings.validate()
     except RuntimeError as exc:
@@ -83,11 +97,15 @@ async def async_main(args: argparse.Namespace) -> int:
 
     alerts = AudioAlertsManager(volume=args.volume, enabled=not args.no_alerts)
     typer = TextTyper(char_delay=args.char_delay, add_space_before=args.add_space)
-    backend = OpenAIWhisperBackend(api_key=settings.openai_api_key, model=settings.whisper_model)
+    backend = OpenAIWhisperBackend(
+        api_key=settings.openai_api_key,
+        model=settings.whisper_model,
+    )
 
     client = WhisperDictateClient(
         backend=backend,
         hotkey=args.hotkey,
+        quit_key=args.quit_key,
         language=args.language,
         alerts=alerts,
         typer=typer,
@@ -102,9 +120,9 @@ async def async_main(args: argparse.Namespace) -> int:
 
 def main() -> None:
     """Synchronous entry point registered as the 'whisper-dictate' console script."""
-    parser = build_parser()
-    args = parser.parse_args()
-    sys.exit(asyncio.run(async_main(args)))
+    settings = get_settings()
+    args = build_parser(settings).parse_args()
+    sys.exit(asyncio.run(async_main(args, settings)))
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ import asyncio
 import os
 import time
 import warnings
-from typing import Optional
+from typing import List, Optional
 
 warnings.filterwarnings("ignore")
 os.environ.setdefault("ALSA_PCM_CARD", "0")
@@ -27,6 +27,26 @@ from whisper_dictate.transcription.base import TranscriptionBackend
 from whisper_dictate.typing.text_typer import TextTyper
 
 
+def resolve_key(key_name: str):
+    """
+    Convert a key name to the matching pynput key object.
+
+    Accepts a special-key name ('f9', 'home', 'esc') or a single printable
+    character ('q'), which becomes a KeyCode so it compares equal to the
+    events pynput reports for that character.
+
+    Raises:
+        ValueError: if the name matches neither form.
+    """
+    name = key_name.strip().lower()
+    special = getattr(kb_module.Key, name, None)
+    if isinstance(special, kb_module.Key):
+        return special
+    if len(name) == 1:
+        return kb_module.KeyCode.from_char(name)
+    raise ValueError(f"unknown key name: {key_name!r}")
+
+
 class WhisperDictateClient:
     """
     Coordinates recording, transcription, and text injection.
@@ -38,10 +58,17 @@ class WhisperDictateClient:
 
     MIN_RECORDING_DURATION: float = 0.5  # seconds
 
+    DEFAULT_HOTKEY: str = "f9"
+    #: Quitting is bound to a key that is awkward to hit by accident. ESC is
+    #: deliberately *not* used: it is pressed constantly while working and used
+    #: to kill the app mid-dictation.
+    DEFAULT_QUIT_KEY: str = "home"
+
     def __init__(
         self,
         backend: TranscriptionBackend,
-        hotkey: str = "f9",
+        hotkey: str = DEFAULT_HOTKEY,
+        quit_key: str = DEFAULT_QUIT_KEY,
         language: str = "auto",
         alerts: Optional[AudioAlertsManager] = None,
         typer: Optional[TextTyper] = None,
@@ -51,6 +78,7 @@ class WhisperDictateClient:
         Args:
             backend:  TranscriptionBackend implementation to use.
             hotkey:   Pynput key name for the record toggle (e.g. 'f9', 'f10').
+            quit_key: Pynput key name that exits the application (e.g. 'home').
             language: ISO 639-1 language code or 'auto' for auto-detection.
             alerts:   AudioAlertsManager instance (created with defaults if None).
             typer:    TextTyper instance (created with defaults if None).
@@ -59,8 +87,13 @@ class WhisperDictateClient:
         self._backend = backend
         self._language = language
         self._verbose = verbose
-        self._hotkey = self._resolve_hotkey(hotkey)
-        self._hotkey_name = hotkey.upper()
+
+        self._hotkey, self._hotkey_name = self._resolve_or_default(
+            hotkey, self.DEFAULT_HOTKEY
+        )
+        self._quit_key, self._quit_key_name = self._resolve_or_default(
+            quit_key, self.DEFAULT_QUIT_KEY
+        )
 
         self._alerts = alerts or AudioAlertsManager()
         self._recorder = AudioRecorder(
@@ -81,7 +114,7 @@ class WhisperDictateClient:
     async def run(self) -> int:
         """
         Start the client: set up audio, listen for hotkeys, and block
-        until ESC is pressed.
+        until the quit key is pressed.
 
         Returns:
             0 on clean exit, 1 on initialization failure.
@@ -93,15 +126,31 @@ class WhisperDictateClient:
             self._log("Could not initialize audio device")
             return 1
 
-        self._log(f"Ready. Press {self._hotkey_name} to record, ESC to quit.")
+        self._log(
+            f"Ready. Press {self._hotkey_name} to record, "
+            f"{self._quit_key_name} to quit."
+        )
 
-        with kb_module.Listener(on_press=self._on_key_press) as listener:
-            while not self._should_quit:
-                await asyncio.sleep(0.05)
-            listener.stop()
+        try:
+            with kb_module.Listener(on_press=self._on_key_press) as listener:
+                while not self._should_quit:
+                    await asyncio.sleep(0.05)
+                listener.stop()
+        finally:
+            self._shutdown()
 
-        self._recorder.teardown()
         return 0
+
+    def _shutdown(self) -> None:
+        """
+        Release audio resources and signal the exit audibly.
+
+        The recorder is torn down *before* the shutdown sound so the player
+        subprocess never overlaps with an open PortAudio stream — that overlap
+        is what used to corrupt the heap on Linux/PulseAudio.
+        """
+        self._recorder.teardown()
+        self._alerts.play_shutdown()
 
     # ------------------------------------------------------------------
     # Key handling
@@ -116,11 +165,13 @@ class WhisperDictateClient:
                 asyncio.run_coroutine_threadsafe(
                     self._toggle_recording(), self._loop
                 )
-            elif key == kb_module.Key.esc:
-                self._log("ESC pressed - quitting...")
+            elif key == self._quit_key:
+                self._log(f"{self._quit_key_name} pressed - quitting...")
                 self._should_quit = True
-        except Exception:
-            pass
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            # Never let a listener callback raise: pynput would stop the
+            # listener and the app would silently go deaf to the hotkey.
+            self._log(f"Key handling error: {e}")
 
     def _on_recorder_auto_stop(self) -> None:
         """
@@ -156,11 +207,9 @@ class WhisperDictateClient:
     # Transcription + typing
     # ------------------------------------------------------------------
 
-    async def _transcribe_and_type(self, frames: list) -> None:
+    async def _transcribe_and_type(self, frames: List[bytes]) -> None:
         """Send recorded frames to the backend, then type the result."""
-        duration = (
-            len(frames) * self._recorder.CHUNK_SIZE / self._recorder.sample_rate
-        )
+        duration = self._recorder.frames_duration(frames)
         if duration < self.MIN_RECORDING_DURATION:
             self._log(
                 f"Recording too short ({duration:.1f}s) - "
@@ -170,28 +219,36 @@ class WhisperDictateClient:
             return
 
         self._log("Transcribing...")
-        self._transcribing = True
 
+        # Held until the text has been typed: a hotkey press in the middle of
+        # typing would otherwise start a recording that swallows the keystrokes.
+        self._transcribing = True
+        try:
+            await self._transcribe_and_type_unguarded(frames)
+        finally:
+            self._transcribing = False
+
+    async def _transcribe_and_type_unguarded(self, frames: List[bytes]) -> None:
+        """Transcribe and type, assuming the _transcribing guard is already held."""
         try:
             text = await self._backend.transcribe(
                 frames=frames,
                 sample_rate=self._recorder.sample_rate,
                 language=None if self._language == "auto" else self._language,
             )
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             self._log(f"Transcription error: {e}")
             self._alerts.play_error()
             return
-        finally:
-            self._transcribing = False
 
-        if not text or not text.strip():
+        text = (text or "").strip()
+        if not text:
             self._log("No speech detected")
             self._alerts.play_error()
             return
 
-        self._log(f"Transcription: '{text.strip()}'")
-        if self._typer.type_text(text.strip()):
+        self._log(f"Transcription: '{text}'")
+        if self._typer.type_text(text):
             self._alerts.play_done()
             self._log("Text typed at cursor position")
         else:
@@ -202,14 +259,19 @@ class WhisperDictateClient:
     # Helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _resolve_hotkey(key_name: str):
-        """Convert a key name string to the corresponding pynput Key."""
+    def _resolve_or_default(self, key_name: str, fallback: str):
+        """
+        Resolve a key name, falling back to a known-good default.
+
+        Returns:
+            (key object, display name) — the display name always matches the
+            key that was actually bound, so the banner never lies.
+        """
         try:
-            return getattr(kb_module.Key, key_name.lower())
-        except AttributeError:
-            print(f"Warning: unknown key '{key_name}', defaulting to f9")
-            return kb_module.Key.f9
+            return resolve_key(key_name), key_name.upper()
+        except ValueError as e:
+            print(f"Warning: {e}, defaulting to {fallback}")
+            return resolve_key(fallback), fallback.upper()
 
     def _log(self, msg: str) -> None:
         if self._verbose:
@@ -220,8 +282,8 @@ class WhisperDictateClient:
         print("=" * 45)
         print("  WHISPER DICTATE - Voice to Keyboard")
         print("=" * 45)
-        print(f"  {self._hotkey_name:<4} : Start / Stop recording")
-        print(f"  ESC  : Quit")
+        print(f"  {self._hotkey_name:<5}: Start / Stop recording")
+        print(f"  {self._quit_key_name:<5}: Quit")
         print(f"  Language : {self._language}")
         print("=" * 45)
         print()

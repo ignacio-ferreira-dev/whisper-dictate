@@ -9,6 +9,10 @@ dependencies:
   # PyAudio via conda-forge (handles PortAudio system dependency automatically)
   - pyaudio=0.2.14
 
+  # ffmpeg provides ffplay, used to play the MP3 alert sounds in a separate
+  # process. Without it the alerts are silent (paplay/aplay cannot decode MP3).
+  - ffmpeg
+
   # Everything else via pip
   - pip
   - pip:
