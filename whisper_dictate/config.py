@@ -38,6 +38,29 @@ SUPPORTED_LANGUAGES: dict[str, str] = {
 }
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    """Read a boolean env var; anything other than 'true' (any case) is False."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() == "true"
+
+
+def _env_number(name: str, default, cast):
+    """
+    Read a numeric env var, falling back to the default with a clear message
+    instead of crashing the app on a typo in .env.
+    """
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return cast(raw)
+    except ValueError:
+        print(f"Warning: {name}={raw!r} is not a valid number, using {default}")
+        return default
+
+
 class Settings:
     """
     Application-wide configuration.
@@ -56,23 +79,19 @@ class Settings:
 
         # --- Language ---
         self.default_language: str = os.getenv("DEFAULT_LANGUAGE", "auto")
-        self.enable_translation: bool = (
-            os.getenv("ENABLE_TRANSLATION", "false").lower() == "true"
-        )
+        self.enable_translation: bool = _env_bool("ENABLE_TRANSLATION", False)
 
         # --- Audio ---
-        self.sample_rate: int = int(os.getenv("SAMPLE_RATE", "16000"))
-        self.chunk_size: int = int(os.getenv("CHUNK_SIZE", "1024"))
+        self.sample_rate: int = _env_number("SAMPLE_RATE", 16000, int)
+        self.chunk_size: int = _env_number("CHUNK_SIZE", 1024, int)
+
+        # --- Keys ---
+        self.hotkey: str = os.getenv("HOTKEY", "f9")
+        self.quit_key: str = os.getenv("QUIT_KEY", "home")
 
         # --- UI / Alerts ---
-        self.alert_volume: float = float(os.getenv("ALERT_VOLUME", "0.8"))
-        self.alerts_enabled: bool = (
-            os.getenv("ALERTS_ENABLED", "true").lower() == "true"
-        )
-
-        # --- Server (legacy FastAPI server) ---
-        self.host: str = os.getenv("HOST", "localhost")
-        self.port: int = int(os.getenv("PORT", "8000"))
+        self.alert_volume: float = _env_number("ALERT_VOLUME", 0.8, float)
+        self.alerts_enabled: bool = _env_bool("ALERTS_ENABLED", True)
 
     def validate(self) -> None:
         """

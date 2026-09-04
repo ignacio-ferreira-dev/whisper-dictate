@@ -11,9 +11,10 @@ Powered by [OpenAI Whisper](https://openai.com/research/whisper). No local model
 ## How it works
 
 ```
-F9 pressed  →  audio alert (start)  →  microphone captures audio
-F9 pressed  →  audio alert (stop)   →  audio sent to Whisper API
-                                    →  transcription typed at cursor
+F9 pressed    →  audio alert (start)  →  microphone captures audio
+F9 pressed    →  audio alert (stop)   →  audio sent to Whisper API
+                                      →  transcription typed at cursor
+HOME pressed  →  double closing beep  →  app quits
 ```
 
 Recordings auto-stop after 10 minutes and transcribe automatically.
@@ -25,6 +26,10 @@ Recordings auto-stop after 10 minutes and transcribe automatically.
 ### Prerequisites
 
 - An [OpenAI API key](https://platform.openai.com/api-keys)
+- `ffmpeg` (for `ffplay`), used to play the MP3 alert sounds:
+  `sudo apt install ffmpeg` — `mpg123` works too. Without one of them the app
+  runs fine but the alerts are silent, and it says so on the first attempt.
+  `paplay`/`aplay` are **not** enough: neither decodes MP3.
 
 ### Option A — Conda (recommended)
 
@@ -86,9 +91,11 @@ whisper-dictate
 |-----|--------|
 | `F9` | Start recording (plays a start beep) |
 | `F9` again | Stop recording, transcribe, type at cursor |
-| `ESC` | Quit |
+| `HOME` | Quit (plays the stop beep twice) |
 
 Recordings stop automatically after 10 minutes and are transcribed immediately — no need to press F9 again.
+
+`ESC` deliberately does **not** quit: it is pressed far too often while working, and used to kill the app in the middle of a dictation. Use `--quit-key` if you want a different one.
 
 ### Options
 
@@ -96,6 +103,7 @@ Recordings stop automatically after 10 minutes and are transcribed immediately �
 whisper-dictate --help
 
   --hotkey KEY        Pynput key name for the record toggle  [default: f9]
+  --quit-key KEY      Pynput key name that quits the app  [default: home]
   --language CODE     Language code: 'auto', 'es', 'en', 'fr', ...  [default: auto]
   --volume FLOAT      Alert volume 0.0–1.0  [default: 0.8]
   --no-alerts         Disable audio alerts
@@ -115,7 +123,12 @@ whisper-dictate --char-delay 0.03
 
 # Always prepend a space (useful mid-sentence)
 whisper-dictate --add-space
+
+# Quit with F12 instead of HOME
+whisper-dictate --quit-key f12
 ```
+
+Command-line flags override the `.env` values; the `.env` values override the built-in defaults.
 
 ---
 
@@ -169,6 +182,8 @@ All settings can be set in `.env` (copy from `.env.example`) or as environment v
 | `OPENAI_API_KEY` | *(required)* | Your OpenAI API key |
 | `WHISPER_MODEL` | `whisper-1` | OpenAI Whisper model |
 | `DEFAULT_LANGUAGE` | `auto` | ISO 639-1 code or `auto` |
+| `HOTKEY` | `f9` | Key that starts/stops recording |
+| `QUIT_KEY` | `home` | Key that quits the application |
 | `SAMPLE_RATE` | `16000` | Microphone sample rate in Hz |
 | `ALERT_VOLUME` | `0.8` | Alert sound volume (0.0–1.0) |
 | `ALERTS_ENABLED` | `true` | Enable/disable audio alerts |
