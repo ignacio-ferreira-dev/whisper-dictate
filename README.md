@@ -14,7 +14,7 @@ Powered by [OpenAI Whisper](https://openai.com/research/whisper). No local model
 F9 pressed    →  audio alert (start)  →  microphone captures audio
 F9 pressed    →  audio alert (stop)   →  audio sent to Whisper API
                                       →  transcription typed at cursor
-HOME pressed  →  double closing beep  →  app quits
+HOME pressed  →  two overlapping beeps →  app quits
 ```
 
 Recordings auto-stop after 10 minutes and transcribe automatically.
@@ -91,11 +91,32 @@ whisper-dictate
 |-----|--------|
 | `F9` | Start recording (plays a start beep) |
 | `F9` again | Stop recording, transcribe, type at cursor |
-| `HOME` | Quit (plays the stop beep twice) |
+| `HOME` | Quit (plays two overlapping beeps) |
 
 Recordings stop automatically after 10 minutes and are transcribed immediately — no need to press F9 again.
 
-`ESC` deliberately does **not** quit: it is pressed far too often while working, and used to kill the app in the middle of a dictation. Use `--quit-key` if you want a different one.
+The quit sound is the stop beep played twice, the second starting half a second into the first so they overlap. That stutter is what tells you the app closed rather than just finishing a recording.
+
+### Changing the keys
+
+Both keys are configurable, in `.env` or on the command line:
+
+```bash
+# .env
+HOTKEY=f9
+QUIT_KEY=home
+```
+
+```bash
+# or per run — the flag wins over .env, which wins over the defaults
+whisper-dictate --hotkey f10 --quit-key end
+```
+
+Any [pynput key name](https://pynput.readthedocs.io/en/latest/keyboard.html#pynput.keyboard.Key) works — `f1`–`f20`, `home`, `end`, `insert`, `delete`, `page_up`, `page_down`, `pause`, `scroll_lock` — as does a single character such as `q`. An unknown name falls back to the default and says so on startup; the banner always shows the key that is actually bound.
+
+`ESC` deliberately is **not** the default quit key: it is pressed far too often while working and kept killing the app in the middle of a dictation. Set `QUIT_KEY=esc` if you want the old behaviour back.
+
+Pick a quit key you will not hit by accident — it is captured globally, in every application.
 
 ### Options
 

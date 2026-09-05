@@ -24,7 +24,7 @@ Usage:
     alerts.play_stop()      # recording stopped
     alerts.play_done()      # transcription succeeded
     alerts.play_error()     # something went wrong
-    alerts.play_shutdown()  # application is quitting
+    alerts.play_shutdown()  # application is quitting (overlapping double beep)
 """
 
 import functools
@@ -36,9 +36,6 @@ from typing import List, Optional
 
 
 _SOUNDS_DIR = os.path.join(os.path.dirname(__file__), "..", "sounds")
-
-#: Seconds to wait between the repeats of a multi-shot alert.
-_REPEAT_GAP_SECONDS = 0.12
 
 #: Hard cap on how long a single playback subprocess may run.
 _PLAYBACK_TIMEOUT_SECONDS = 10
@@ -138,14 +135,20 @@ class AudioAlertsManager:
         "error": "transcription_end_error.mp3",
     }
 
-    #: Number of times play_shutdown() repeats the stop sound. Two quick
-    #: beeps are what distinguishes "app quitting" from "recording stopped".
+    #: Number of times play_shutdown() repeats the stop sound. Two beeps are
+    #: what distinguishes "app quitting" from "recording stopped".
     SHUTDOWN_REPEATS: int = 2
+
+    #: How long after one shutdown beep starts the next one starts. Shorter
+    #: than SHUTDOWN_BEEP_SECONDS on purpose: the beeps overlap, so the pair
+    #: is heard as a single stuttered sound rather than as the ordinary stop
+    #: beep played twice, which is ambiguous with "the recording stopped".
+    SHUTDOWN_BEEP_OFFSET_SECONDS: float = 0.5
 
     #: Each shutdown beep is cut to this length. recording_end.mp3 is 3.2 s
     #: long but only its first 0.8 s carry sound, so playing it whole twice
-    #: would stall the exit for ~6.5 s and read as two separate events
-    #: instead of one double beep. Players without a trim flag play it whole.
+    #: would stall the exit for ~6.5 s. Players without a trim flag play it
+    #: whole; the overlap still happens, the exit is just slower.
     SHUTDOWN_BEEP_SECONDS: float = 0.9
 
     def __init__(
@@ -194,16 +197,22 @@ class AudioAlertsManager:
 
     def play_shutdown(self) -> None:
         """
-        Play the recording-end sound twice in quick succession, synchronously.
+        Play the recording-end sound twice, overlapping, synchronously.
 
-        The double beep signals that the application itself is quitting, as
-        opposed to a single beep meaning "recording stopped". Blocking is
-        deliberate: the process exits right after this returns, and a
-        background thread would be killed before the sound is audible.
+        The second beep starts SHUTDOWN_BEEP_OFFSET_SECONDS after the first,
+        before the first has finished, so the two run together as one
+        stuttered sound. Playing them back to back instead was too easy to
+        confuse with an ordinary "recording stopped" beep.
+
+        Blocking is deliberate: the process exits right after this returns,
+        and a background thread would be killed before the sound is audible.
         """
-        self._play_sync(
+        if not self.enabled:
+            return
+        self._play_overlapping(
             "stop",
             repeats=self.SHUTDOWN_REPEATS,
+            offset=self.SHUTDOWN_BEEP_OFFSET_SECONDS,
             max_seconds=self.SHUTDOWN_BEEP_SECONDS,
         )
 
@@ -211,56 +220,93 @@ class AudioAlertsManager:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _play_sync(self, event: str, repeats: int = 1, max_seconds=None) -> None:
-        """Play a sound and block until the last subprocess finishes."""
+    def _play_sync(self, event: str) -> None:
+        """Play a sound and block until the subprocess finishes."""
         if not self.enabled:
             return
-        self._play_event(event, repeats=repeats, max_seconds=max_seconds)
+        self._play_event(event)
 
-    def _play_async(self, event: str, repeats: int = 1, max_seconds=None) -> None:
+    def _play_async(self, event: str) -> None:
         """Spawn a daemon thread so playback never blocks the caller."""
         if not self.enabled:
             return
-        threading.Thread(
-            target=self._play_event,
-            args=(event,),
-            kwargs={"repeats": repeats, "max_seconds": max_seconds},
-            daemon=True,
-        ).start()
+        threading.Thread(target=self._play_event, args=(event,), daemon=True).start()
 
-    def _play_event(
-        self, event: str, repeats: int = 1, max_seconds: Optional[float] = None
-    ) -> None:
+    def _play_event(self, event: str) -> None:
         """Play the sound file for the given event via subprocess."""
+        path = _sound_path(self._SOUND_MAP[event])
+        if os.path.isfile(path):
+            self._play_file(path)
+
+    def _play_overlapping(
+        self, event: str, repeats: int, offset: float, max_seconds: Optional[float]
+    ) -> None:
+        """
+        Start `repeats` playbacks `offset` seconds apart and wait for them all.
+
+        Each playback is its own process, so they genuinely overlap instead of
+        queuing up behind each other.
+        """
         path = _sound_path(self._SOUND_MAP[event])
         if not os.path.isfile(path):
             return
+        command = self._command_for(path, max_seconds)
+        if command is None:
+            return
+
+        processes = []
         for index in range(repeats):
             if index:
-                threading.Event().wait(_REPEAT_GAP_SECONDS)
-            self._play_file(path, max_seconds=max_seconds)
+                threading.Event().wait(offset)
+            process = self._spawn(command)
+            if process is None:
+                break
+            processes.append(process)
+
+        for process in processes:
+            self._await(process, path)
 
     def _play_file(self, path: str, max_seconds: Optional[float] = None) -> None:
-        """Invoke the system audio player as a subprocess."""
+        """Invoke the system audio player as a subprocess and wait for it."""
+        command = self._command_for(path, max_seconds)
+        if command is None:
+            return
+        process = self._spawn(command)
+        if process is not None:
+            self._await(process, path)
+
+    def _command_for(self, path: str, max_seconds: Optional[float]) -> Optional[List[str]]:
+        """Return the argv that plays `path`, or None if no player can decode it."""
         player = self._player_for(path)
         if player is None:
             self._warn_once(f"no audio player available for {os.path.basename(path)}")
-            return
+            return None
+        return player.command(path, self.volume, max_seconds)
+
+    def _spawn(self, command: List[str]):
+        """Start a player process, or return None if it could not be started."""
         try:
-            result = subprocess.run(
-                player.command(path, self.volume, max_seconds),
+            return subprocess.Popen(  # pylint: disable=consider-using-with
+                command,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
-                timeout=_PLAYBACK_TIMEOUT_SECONDS,
-                check=False,
             )
         except Exception as exc:  # pylint: disable=broad-exception-caught
-            self._warn_once(f"{player.name} could not be run: {exc}")
+            self._warn_once(f"{command[0]} could not be run: {exc}")
+            return None
+
+    def _await(self, process, path: str) -> None:
+        """Wait for a player process, reporting a failure at most once."""
+        try:
+            _, stderr = process.communicate(timeout=_PLAYBACK_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            self._warn_once(f"playback of {os.path.basename(path)} timed out")
             return
-        if result.returncode != 0:
-            detail = result.stderr.decode(errors="replace").strip().splitlines()
+        if process.returncode != 0:
+            detail = stderr.decode(errors="replace").strip().splitlines()
             self._warn_once(
-                f"{player.name} failed to play {os.path.basename(path)}"
+                f"failed to play {os.path.basename(path)}"
                 + (f": {detail[-1]}" if detail else "")
             )
 
