@@ -95,7 +95,7 @@ class TestSettingsEnvironmentOverrides:
 
 
 LONG_RECORDING_SETTINGS = [
-    ("MAX_RECORDING_MINUTES", "max_recording_minutes", 60),
+    ("MAX_RECORDING_MINUTES", "max_recording_minutes", 30),
     ("TRANSCRIPTION_CHUNK_SECONDS", "transcription_chunk_seconds", 600),
     ("TRANSCRIPTION_MAX_PARALLEL", "transcription_max_parallel", 4),
 ]

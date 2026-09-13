@@ -26,14 +26,20 @@ def _client(**kwargs) -> WhisperDictateClient:
     )
 
 
-class TestRecordingCap:
-    """The configured recording cap reaches the recorder's watchdog."""
+class TestRecordingLimits:
+    """The recording cap and the segment beep interval reach the recorder's watchdog."""
 
     def test_cap_is_forwarded_to_the_recorder(self):
         assert _client(max_recording_seconds=90)._recorder.max_recording_seconds == 90
 
-    def test_default_cap_is_an_hour(self):
-        assert _client()._recorder.max_recording_seconds == 3600
+    def test_default_cap_is_half_an_hour(self):
+        assert _client()._recorder.max_recording_seconds == 1800
+
+    def test_segment_interval_is_forwarded_to_the_recorder(self):
+        assert _client(segment_seconds=600)._recorder.segment_seconds == 600
+
+    def test_no_segment_beep_unless_asked(self):
+        assert _client()._recorder.segment_seconds is None
 
 
 # ---------------------------------------------------------------------------

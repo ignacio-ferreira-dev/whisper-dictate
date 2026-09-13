@@ -151,6 +151,15 @@ class AudioAlertsManager:
     #: whole; the overlap still happens, the exit is just slower.
     SHUTDOWN_BEEP_SECONDS: float = 0.9
 
+    #: The segment tick is the start sound played twice, overlapping, for the
+    #: same reason the shutdown sound is: played once it is indistinguishable
+    #: from "a recording just started", which is the one other thing that sound
+    #: means. Each tick is cut to the sound's audible part (recording_start.mp3
+    #: goes silent at ~0.67 s) so the pair stays short.
+    SEGMENT_BEEP_REPEATS: int = 2
+    SEGMENT_BEEP_OFFSET_SECONDS: float = 0.25
+    SEGMENT_BEEP_SECONDS: float = 0.7
+
     def __init__(
         self,
         volume: float = 0.8,
@@ -185,15 +194,31 @@ class AudioAlertsManager:
 
     def play_stop(self) -> None:
         """Play the recording-end sound asynchronously."""
-        self._play_async("stop")
+        self._play_async(self._play_event, "stop")
 
     def play_done(self) -> None:
         """Play the transcription-success sound asynchronously."""
-        self._play_async("done")
+        self._play_async(self._play_event, "done")
 
     def play_error(self) -> None:
         """Play the error sound asynchronously."""
-        self._play_async("error")
+        self._play_async(self._play_event, "error")
+
+    def play_segment(self) -> None:
+        """
+        Play a short double tick, asynchronously, while a recording keeps going.
+
+        Marks that a long recording has started a new transcription segment.
+        Asynchronous because it is called from the recorder's watchdog thread,
+        which must keep watching the recording's length while it plays.
+        """
+        self._play_async(
+            self._play_overlapping,
+            "start",
+            self.SEGMENT_BEEP_REPEATS,
+            self.SEGMENT_BEEP_OFFSET_SECONDS,
+            self.SEGMENT_BEEP_SECONDS,
+        )
 
     def play_shutdown(self) -> None:
         """
@@ -226,11 +251,11 @@ class AudioAlertsManager:
             return
         self._play_event(event)
 
-    def _play_async(self, event: str) -> None:
-        """Spawn a daemon thread so playback never blocks the caller."""
+    def _play_async(self, target, *args) -> None:
+        """Run a playback call in a daemon thread so it never blocks the caller."""
         if not self.enabled:
             return
-        threading.Thread(target=self._play_event, args=(event,), daemon=True).start()
+        threading.Thread(target=target, args=args, daemon=True).start()
 
     def _play_event(self, event: str) -> None:
         """Play the sound file for the given event via subprocess."""

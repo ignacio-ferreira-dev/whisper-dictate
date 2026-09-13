@@ -22,7 +22,7 @@ import contextlib
 import os
 import threading
 import time
-from typing import Callable, List, Optional
+from typing import List, Optional
 
 import pyaudio
 
@@ -65,28 +65,30 @@ class AudioRecorder:
     CHANNELS: int = 1
     CHUNK_SIZE: int = 1024
 
+    #: How often the watchdog checks the recording's length.
+    WATCHDOG_INTERVAL_SECONDS: float = 0.5
+
     def __init__(
         self,
         alerts: Optional[AudioAlertsManager] = None,
         verbose: bool = True,
-        on_auto_stop: Optional[Callable[[], None]] = None,
         max_recording_seconds: float = DEFAULT_MAX_RECORDING_SECONDS,
+        segment_seconds: Optional[float] = None,
     ):
         """
         Args:
             alerts:       AudioAlertsManager instance. If None a default one is created.
             verbose:      When True, print status messages to stdout.
-            on_auto_stop: Optional callback invoked when recording stops automatically
-                          (max duration reached or stream error). Called from the
-                          capture thread — must be thread-safe (e.g. schedule a coroutine
-                          with run_coroutine_threadsafe).
-            max_recording_seconds: Recording auto-stops (and is transcribed normally)
-                          once it reaches this length.
+            max_recording_seconds: A recording still running at this length is
+                          cancelled — discarded, not transcribed, with the error
+                          beep: nobody stopped it, so it was left on by mistake.
+            segment_seconds: When set, a short beep plays each time the recording
+                          grows by this much, and the recording keeps going.
         """
         self.alerts = alerts or AudioAlertsManager()
         self.verbose = verbose
-        self._on_auto_stop = on_auto_stop
         self.max_recording_seconds = max_recording_seconds
+        self.segment_seconds = segment_seconds
 
         self._pa: Optional[pyaudio.PyAudio] = None
         self._stream: Optional[pyaudio.Stream] = None
@@ -234,11 +236,6 @@ class AudioRecorder:
         """True while audio capture is active."""
         return self._recording
 
-    @property
-    def has_pending_frames(self) -> bool:
-        """True if there are buffered frames ready to transcribe but not yet consumed."""
-        return bool(self._buffer) and not self._recording
-
     def get_duration(self) -> float:
         """Return duration in seconds of currently buffered audio."""
         return self.frames_duration(self._buffer)
@@ -277,28 +274,51 @@ class AudioRecorder:
 
     def _watchdog_loop(self) -> None:
         """
-        Background thread: monitors recording duration limit.
+        Background thread: watches the recording's length while it runs.
         Does not read from the stream — PortAudio calls _stream_callback directly.
         """
-        auto_stopped = False
-
+        next_beep = self.segment_seconds
         while self._recording:
-            if self.get_duration() >= self.max_recording_seconds:
-                self._log(
-                    f"Maximum recording duration reached "
-                    f"({self.max_recording_seconds / 60:g} min) — stopping and transcribing"
-                )
-                self._recording = False
-                self._stop_stream()
-                auto_stopped = True
+            next_beep = self._watchdog_tick(next_beep)
+            if not self._recording:
+                # Cancelled by the tick. Leaving now matters: sleeping first
+                # would let a hotkey press start a recording that this thread
+                # then watches as well as its own successor — two watchdogs,
+                # two beep schedules, two cancels.
                 break
-            time.sleep(0.5)
+            time.sleep(self.WATCHDOG_INTERVAL_SECONDS)
 
-        # The stop sound is not played here: the callback funnels back into
-        # stop_recording(), which owns it. Playing it in both places produced
-        # a double beep on every auto-stop.
-        if auto_stopped and self._on_auto_stop:
-            self._on_auto_stop()
+    def _watchdog_tick(self, next_beep: Optional[float]) -> Optional[float]:
+        """
+        Run one watchdog check and return the length at which the next segment
+        beep is due (None: no segment beeps).
+        """
+        duration = self.get_duration()
+        if duration >= self.max_recording_seconds:
+            self._cancel_recording()
+            return next_beep
+        if next_beep is not None and duration >= next_beep:
+            self._log(f"{duration / 60:.1f} min recorded - new segment, still recording")
+            self.alerts.play_segment()
+            return next_beep + self.segment_seconds
+        return next_beep
+
+    def _cancel_recording(self) -> None:
+        """
+        Discard a recording that reached max_recording_seconds.
+
+        Nobody stopped it, so it was almost certainly left running by mistake:
+        its audio is dropped instead of being transcribed and typed into
+        whatever window happens to have focus.
+        """
+        self._recording = False
+        self._stop_stream()
+        self._buffer = []
+        self._log(
+            f"Recording cancelled - still running after "
+            f"{self.max_recording_seconds / 60:.1f} min, audio discarded"
+        )
+        self.alerts.play_error()
 
     def _find_working_device(self) -> bool:
         """

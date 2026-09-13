@@ -90,6 +90,20 @@ def _openai_backend(settings: Settings):
 BACKENDS = {"openai": _openai_backend}
 
 
+def recording_limits(settings: Settings) -> dict:
+    """
+    Return the recording limits the client passes to its recorder.
+
+    The segment beep uses the configured segment length, which is what the
+    transcription aims for — the actual cuts can be shorter when the upload
+    byte budget binds first (high sample rates).
+    """
+    return {
+        "max_recording_seconds": settings.max_recording_seconds,
+        "segment_seconds": settings.transcription_chunk_seconds,
+    }
+
+
 def build_backend(settings: Settings, name: str):
     """
     Return the named transcription backend, wrapped so that recordings too
@@ -139,7 +153,7 @@ async def async_main(args: argparse.Namespace, settings: Settings) -> int:
         language=args.language,
         alerts=alerts,
         typer=typer,
-        max_recording_seconds=settings.max_recording_seconds,
+        **recording_limits(settings),
     )
 
     try:

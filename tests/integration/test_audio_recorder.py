@@ -13,6 +13,7 @@ Run with:
 import time
 import pytest
 
+from whisper_dictate.audio.alerts import AudioAlertsManager
 from whisper_dictate.audio.recorder import AudioRecorder
 
 pytestmark = pytest.mark.integration
@@ -89,6 +90,42 @@ class TestAudioCapture:
 
     def test_get_duration_is_zero_before_recording(self, recorder):
         assert recorder.get_duration() == pytest.approx(0.0)
+
+
+class TestLongRecordingWatchdog:
+    """
+    The segment beep plays while the microphone is capturing, and the capture
+    survives it. Sounds overlapping an active PortAudio stream used to corrupt
+    the heap (de6234f … 528171d), so this runs on real hardware, with real
+    playback — silent alerts would prove nothing.
+    """
+
+    def test_segment_beeps_during_capture_do_not_break_it(self):
+        rec = AudioRecorder(
+            alerts=AudioAlertsManager(volume=0.3), verbose=False,
+            max_recording_seconds=60, segment_seconds=1,
+        )
+        assert rec.setup()
+        try:
+            rec.start_recording()
+            time.sleep(4.5)  # four segment beeps while capturing
+            still_recording = rec.is_recording
+            frames = rec.stop_recording()
+        finally:
+            rec.teardown()
+        assert still_recording
+        assert rec.frames_duration(frames) > 4.0
+
+    def test_the_cap_cancels_and_discards_the_recording(self, silent_alerts):
+        rec = AudioRecorder(alerts=silent_alerts, verbose=False, max_recording_seconds=1.5)
+        assert rec.setup()
+        try:
+            rec.start_recording()
+            time.sleep(2.5)
+            assert rec.is_recording is False
+            assert rec.stop_recording() == []
+        finally:
+            rec.teardown()
 
 
 class TestTeardown:

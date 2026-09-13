@@ -17,7 +17,7 @@ F9 pressed    →  audio alert (stop)   →  audio sent to Whisper API
 HOME pressed  →  two overlapping beeps →  app quits
 ```
 
-Long recordings are split into segments that are transcribed in parallel and joined back in order, so they are no longer limited by Whisper's 25 MB upload cap; recordings auto-stop after 60 minutes (configurable) as a safety net.
+Long recordings are split into segments that are transcribed in parallel and joined back in order, so they are no longer limited by Whisper's 25 MB upload cap. A short beep every 10 minutes tells you it is still recording, and a recording left running for 30 minutes is cancelled as a safety net.
 
 ---
 
@@ -93,7 +93,9 @@ whisper-dictate
 | `F9` again | Stop recording, transcribe, type at cursor |
 | `HOME` | Quit (plays two overlapping beeps) |
 
-Recordings stop automatically after 60 minutes (`MAX_RECORDING_MINUTES`) and are transcribed immediately — no need to press F9 again.
+A recording keeps going until you press F9 again. Every 10 minutes (`TRANSCRIPTION_CHUNK_SECONDS`) a short beep tells you it is still recording. That is the segment length the transcription aims for; the actual cuts can be shorter when the 25 MB upload budget binds first (at sample rates above 20 kHz), so treat the beep as "still going", not as an exact marker of where the audio was split. A recording still running after 30 minutes (`MAX_RECORDING_MINUTES`) is assumed to be forgotten and is **cancelled**: the audio is discarded, nothing is typed, and the error beep plays.
+
+The tick plays through your speakers while the microphone is recording, so the microphone picks it up and it ends up in the audio sent to Whisper — harmless in practice, and avoidable with headphones or a lower `ALERT_VOLUME`. The tick follows `TRANSCRIPTION_CHUNK_SECONDS`; it has no separate setting, so lowering that for upload reasons also makes the tick more frequent. `ALERTS_ENABLED=false` silences it along with every other sound.
 
 ### Long recordings
 
@@ -213,7 +215,7 @@ All settings can be set in `.env` (copy from `.env.example`) or as environment v
 | `DEFAULT_LANGUAGE` | `auto` | ISO 639-1 code or `auto` |
 | `HOTKEY` | `f9` | Key that starts/stops recording |
 | `QUIT_KEY` | `home` | Key that quits the application |
-| `MAX_RECORDING_MINUTES` | `60` | Recordings auto-stop and transcribe at this length |
+| `MAX_RECORDING_MINUTES` | `30` | A recording still running at this length is cancelled and discarded |
 | `TRANSCRIPTION_CHUNK_SECONDS` | `600` | Longer recordings are split into segments of at most this length |
 | `TRANSCRIPTION_MAX_PARALLEL` | `4` | Most segments transcribed at the same time |
 | `ALERT_VOLUME` | `0.8` | Alert sound volume (0.0–1.0) |

@@ -94,6 +94,58 @@ class TestDisabledMode:
 
 
 # ---------------------------------------------------------------------------
+# Segment beep
+# ---------------------------------------------------------------------------
+
+
+class TestSegmentBeep:
+    """play_segment() is a short double tick that never blocks the watchdog."""
+
+    def test_plays_the_start_sound_twice(self):
+        a = AudioAlertsManager(player=_FFPLAY)
+        with patch.object(a, "_spawn", return_value=_fake_process()) as mock_spawn, \
+             patch("os.path.isfile", return_value=True):
+            a._play_overlapping("start", a.SEGMENT_BEEP_REPEATS, 0.01, a.SEGMENT_BEEP_SECONDS)
+        assert mock_spawn.call_count == AudioAlertsManager.SEGMENT_BEEP_REPEATS
+        for call_args in mock_spawn.call_args_list:
+            assert call_args[0][0][-1].endswith("recording_start.mp3")
+
+    def test_one_tick_alone_would_be_the_start_beep(self):
+        """
+        The pair is the whole point: recording_start.mp3 played once means
+        "a recording just started", which is the one other thing it means.
+        """
+        assert AudioAlertsManager.SEGMENT_BEEP_REPEATS > 1
+        assert (AudioAlertsManager.SEGMENT_BEEP_OFFSET_SECONDS
+                < AudioAlertsManager.SEGMENT_BEEP_SECONDS)
+
+    def test_each_tick_is_cut_short(self):
+        a = AudioAlertsManager(player=_FFPLAY)
+        command = a._command_for(_sound_path("recording_start.mp3"), a.SEGMENT_BEEP_SECONDS)
+        assert "-t" in command
+        assert "0.7" in command
+
+    def test_runs_in_a_background_thread(self):
+        """The watchdog calls it and must keep watching the recording meanwhile."""
+        a = AudioAlertsManager(player=_FFPLAY)
+        with patch("whisper_dictate.audio.alerts.threading.Thread") as mock_thread:
+            a.play_segment()
+        mock_thread.assert_called_once_with(
+            target=a._play_overlapping,
+            args=("start", a.SEGMENT_BEEP_REPEATS, a.SEGMENT_BEEP_OFFSET_SECONDS,
+                  a.SEGMENT_BEEP_SECONDS),
+            daemon=True,
+        )
+        mock_thread.return_value.start.assert_called_once_with()
+
+    def test_is_a_no_op_when_disabled(self):
+        a = AudioAlertsManager(enabled=False)
+        with patch("whisper_dictate.audio.alerts.threading.Thread") as mock_thread:
+            a.play_segment()
+        mock_thread.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # File routing
 # ---------------------------------------------------------------------------
 
