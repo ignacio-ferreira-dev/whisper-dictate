@@ -97,7 +97,7 @@ Recordings stop automatically after 60 minutes (`MAX_RECORDING_MINUTES`) and are
 
 ### Long recordings
 
-Whisper accepts at most 25 MB per request — about 13 minutes of audio. Anything longer than `TRANSCRIPTION_CHUNK_SECONDS` (5 minutes by default) is split into segments, which are sent in parallel (`TRANSCRIPTION_MAX_PARALLEL` at a time) and joined back in order before typing. Each cut is placed at the quietest moment in the 3 seconds before the boundary, so words are not sliced in half. Short dictations are unaffected: they still go out as a single request.
+Whisper accepts at most 25 MB per request — about 13 minutes of audio. Anything longer than `TRANSCRIPTION_CHUNK_SECONDS` (10 minutes by default — the same length that used to be the hard cut-off) is split into segments, which are sent in parallel (`TRANSCRIPTION_MAX_PARALLEL` at a time) and joined back in order before typing. Each cut is placed at the quietest moment in the 3 seconds before the boundary, so words are not sliced in half. Short dictations are unaffected: they still go out as a single request.
 
 If a segment still fails after the API client's automatic retries, its place in the text is filled with `[error processing this extract of voice command]` and the rest of the dictation is typed normally. Only when no segment produced any text (or a short, single-request dictation fails) is nothing typed and the error beep played.
 
@@ -214,7 +214,7 @@ All settings can be set in `.env` (copy from `.env.example`) or as environment v
 | `HOTKEY` | `f9` | Key that starts/stops recording |
 | `QUIT_KEY` | `home` | Key that quits the application |
 | `MAX_RECORDING_MINUTES` | `60` | Recordings auto-stop and transcribe at this length |
-| `TRANSCRIPTION_CHUNK_SECONDS` | `300` | Longer recordings are split into segments of at most this length |
+| `TRANSCRIPTION_CHUNK_SECONDS` | `600` | Longer recordings are split into segments of at most this length |
 | `TRANSCRIPTION_MAX_PARALLEL` | `4` | Most segments transcribed at the same time |
 | `ALERT_VOLUME` | `0.8` | Alert sound volume (0.0–1.0) |
 | `ALERTS_ENABLED` | `true` | Enable/disable audio alerts |
