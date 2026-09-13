@@ -62,7 +62,7 @@ testpaths = ["tests/unit", "tests/integration"]
 timeout = 30
 markers = [
     "unit: fast tests with no hardware or network required",
-    "integration: tests that require real audio hardware (microphone/speakers)",
+    "integration: tests that need real audio hardware or the paid Whisper API (API tests also need RUN_API_TESTS=1)",
 ]
 
 [tool.black]

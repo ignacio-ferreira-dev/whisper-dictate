@@ -17,7 +17,7 @@ F9 pressed    →  audio alert (stop)   →  audio sent to Whisper API
 HOME pressed  →  two overlapping beeps →  app quits
 ```
 
-Recordings auto-stop after 10 minutes and transcribe automatically.
+Long recordings are split into segments that are transcribed in parallel and joined back in order, so they are no longer limited by Whisper's 25 MB upload cap; recordings auto-stop after 60 minutes (configurable) as a safety net.
 
 ---
 
@@ -93,7 +93,13 @@ whisper-dictate
 | `F9` again | Stop recording, transcribe, type at cursor |
 | `HOME` | Quit (plays two overlapping beeps) |
 
-Recordings stop automatically after 10 minutes and are transcribed immediately — no need to press F9 again.
+Recordings stop automatically after 60 minutes (`MAX_RECORDING_MINUTES`) and are transcribed immediately — no need to press F9 again.
+
+### Long recordings
+
+Whisper accepts at most 25 MB per request — about 13 minutes of audio. Anything longer than `TRANSCRIPTION_CHUNK_SECONDS` (5 minutes by default) is split into segments, which are sent in parallel (`TRANSCRIPTION_MAX_PARALLEL` at a time) and joined back in order before typing. Each cut is placed at the quietest moment in the 3 seconds before the boundary, so words are not sliced in half. Short dictations are unaffected: they still go out as a single request.
+
+If a segment still fails after the API client's automatic retries, its place in the text is filled with `[error processing this extract of voice command]` and the rest of the dictation is typed normally. Only when no segment produced any text (or a short, single-request dictation fails) is nothing typed and the error beep played.
 
 The quit sound is the stop beep played twice, the second starting half a second into the first so they overlap. That stutter is what tells you the app closed rather than just finishing a recording.
 
@@ -165,6 +171,7 @@ whisper_dictate/
 │   └── recorder.py       # AudioRecorder — PyAudio microphone capture
 ├── transcription/
 │   ├── base.py           # TranscriptionBackend — abstract interface (ABC)
+│   ├── chunked.py        # ChunkedTranscriptionBackend — splits long audio, parallel requests
 │   └── openai_backend.py # OpenAIWhisperBackend — implementation via OpenAI API
 ├── typing/
 │   └── text_typer.py     # TextTyper — types text into the active window (pynput)
@@ -189,8 +196,8 @@ class MyBackend(TranscriptionBackend):
         ...
 ```
 
-3. Add your backend name to the `--backend` choices in `whisper_dictate/__main__.py`
-4. Instantiate it in `async_main()` when `args.backend == "my_backend"`
+3. If the service caps the upload size, set the `max_upload_bytes` class attribute — long recordings are then split to fit
+4. Register a factory for it in `BACKENDS` in `whisper_dictate/__main__.py` — its name then becomes a `--backend` choice and a valid `TRANSCRIPTION_BACKEND` value
 
 ---
 
@@ -202,10 +209,13 @@ All settings can be set in `.env` (copy from `.env.example`) or as environment v
 |----------|---------|-------------|
 | `OPENAI_API_KEY` | *(required)* | Your OpenAI API key |
 | `WHISPER_MODEL` | `whisper-1` | OpenAI Whisper model |
+| `TRANSCRIPTION_BACKEND` | `openai` | Transcription backend (same as `--backend`) |
 | `DEFAULT_LANGUAGE` | `auto` | ISO 639-1 code or `auto` |
 | `HOTKEY` | `f9` | Key that starts/stops recording |
 | `QUIT_KEY` | `home` | Key that quits the application |
-| `SAMPLE_RATE` | `16000` | Microphone sample rate in Hz |
+| `MAX_RECORDING_MINUTES` | `60` | Recordings auto-stop and transcribe at this length |
+| `TRANSCRIPTION_CHUNK_SECONDS` | `300` | Longer recordings are split into segments of at most this length |
+| `TRANSCRIPTION_MAX_PARALLEL` | `4` | Most segments transcribed at the same time |
 | `ALERT_VOLUME` | `0.8` | Alert sound volume (0.0–1.0) |
 | `ALERTS_ENABLED` | `true` | Enable/disable audio alerts |
 

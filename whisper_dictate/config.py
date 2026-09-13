@@ -5,6 +5,7 @@ Loads settings from environment variables and/or a .env file.
 The .env file is never committed to version control - see .env.example.
 """
 
+import math
 import os
 from typing import Optional
 
@@ -61,6 +62,27 @@ def _env_number(name: str, default, cast):
         return default
 
 
+def _env_positive_number(name: str, default, cast):
+    """
+    Like _env_number, but zero, a negative value, 'nan' or 'inf' also falls
+    back to the default: none of them is a usable limit.
+    """
+    value = _env_number(name, default, cast)
+    if not math.isfinite(value) or value <= 0:
+        print(f"Warning: {name}={value!r} must be a finite number above zero, using {default}")
+        return default
+    return value
+
+
+#: Recordings stop by themselves after this long and are transcribed.
+DEFAULT_MAX_RECORDING_MINUTES: float = 60
+DEFAULT_MAX_RECORDING_SECONDS: float = DEFAULT_MAX_RECORDING_MINUTES * 60
+#: Longer recordings are split into segments of at most this length.
+DEFAULT_TRANSCRIPTION_CHUNK_SECONDS: float = 300
+#: Most segments transcribed at the same time.
+DEFAULT_TRANSCRIPTION_MAX_PARALLEL: int = 4
+
+
 class Settings:
     """
     Application-wide configuration.
@@ -76,14 +98,21 @@ class Settings:
         self.openai_api_key: Optional[str] = os.getenv("OPENAI_API_KEY")
         self.whisper_model: str = os.getenv("WHISPER_MODEL", "whisper-1")
         self.transcription_backend: str = os.getenv("TRANSCRIPTION_BACKEND", "openai")
+        self.transcription_chunk_seconds: float = _env_positive_number(
+            "TRANSCRIPTION_CHUNK_SECONDS", DEFAULT_TRANSCRIPTION_CHUNK_SECONDS, float
+        )
+        self.transcription_max_parallel: int = _env_positive_number(
+            "TRANSCRIPTION_MAX_PARALLEL", DEFAULT_TRANSCRIPTION_MAX_PARALLEL, int
+        )
 
         # --- Language ---
         self.default_language: str = os.getenv("DEFAULT_LANGUAGE", "auto")
         self.enable_translation: bool = _env_bool("ENABLE_TRANSLATION", False)
 
         # --- Audio ---
-        self.sample_rate: int = _env_number("SAMPLE_RATE", 16000, int)
-        self.chunk_size: int = _env_number("CHUNK_SIZE", 1024, int)
+        self.max_recording_minutes: float = _env_positive_number(
+            "MAX_RECORDING_MINUTES", DEFAULT_MAX_RECORDING_MINUTES, float
+        )
 
         # --- Keys ---
         self.hotkey: str = os.getenv("HOTKEY", "f9")
@@ -108,6 +137,11 @@ class Settings:
                 "  OPENAI_API_KEY=sk-...\n"
                 "See .env.example for the full list of available settings."
             )
+
+    @property
+    def max_recording_seconds(self) -> float:
+        """The recording cap, in the seconds the recorder counts in."""
+        return self.max_recording_minutes * 60
 
     def get_openai_api_key(self) -> Optional[str]:
         """Return the OpenAI API key, or None if not configured."""

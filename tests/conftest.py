@@ -1,17 +1,18 @@
 """
-Shared pytest configuration, fixtures and markers.
+Shared pytest fixtures.
 
-Markers
+Markers (declared in pyproject.toml)
 -------
 unit        Fast tests with no I/O dependencies (no microphone, no network).
-integration Tests that require real audio hardware (microphone / speakers).
+integration Tests that need real audio hardware (microphone / speakers) or
+            the paid Whisper API — API tests also need RUN_API_TESTS=1.
 
 Usage
 -----
 Run only unit tests:
     pytest -m unit
 
-Run only integration tests (requires microphone):
+Run only integration tests (microphone; API tests are skipped unless asked):
     pytest -m integration
 
 Run everything:
@@ -23,11 +24,6 @@ from unittest.mock import MagicMock
 
 from whisper_dictate.audio.alerts import AudioAlertsManager
 from whisper_dictate.audio.recorder import AudioRecorder
-
-
-def pytest_configure(config):
-    config.addinivalue_line("markers", "unit: fast tests, no hardware or network required")
-    config.addinivalue_line("markers", "integration: require real audio hardware")
 
 
 # ---------------------------------------------------------------------------

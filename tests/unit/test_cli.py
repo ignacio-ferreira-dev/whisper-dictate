@@ -5,10 +5,14 @@ The parser takes its defaults from Settings, so these tests pin down the
 resolution order that the README documents: command-line flag > .env > default.
 """
 
+import asyncio
+
 import pytest
 
-from whisper_dictate.__main__ import build_parser
+from tests.unit.audio_samples import RATE, silence
+from whisper_dictate.__main__ import BACKENDS, build_backend, build_parser
 from whisper_dictate.config import Settings
+from whisper_dictate.transcription.openai_backend import OpenAIWhisperBackend
 
 pytestmark = pytest.mark.unit
 
@@ -24,6 +28,11 @@ def settings(monkeypatch) -> Settings:
 
 def _parse(settings: Settings, *argv):
     return build_parser(settings).parse_args(list(argv))
+
+
+def _recording(seconds: int) -> list:
+    """A silent recording as the single frame the backend receives."""
+    return [silence(seconds)]
 
 
 # ---------------------------------------------------------------------------
@@ -80,3 +89,64 @@ class TestResolutionOrder:
 
     def test_alerts_are_enabled_by_default(self, settings):
         assert _parse(settings).no_alerts is False
+
+
+# ---------------------------------------------------------------------------
+# Backend wiring
+# ---------------------------------------------------------------------------
+
+
+class TestBuildBackend:
+    """The selected backend transcribes through the chunking wrapper, configured from Settings."""
+
+    @pytest.fixture
+    def whisper_requests(self, monkeypatch):
+        """Replace the Whisper request with a fake that counts calls and concurrency."""
+        stats = {"count": 0, "in_flight": 0, "peak": 0}
+
+        async def fake_transcribe(self, frames, sample_rate, language=None):
+            stats["count"] += 1
+            stats["in_flight"] += 1
+            stats["peak"] = max(stats["peak"], stats["in_flight"])
+            await asyncio.sleep(0.01)
+            stats["in_flight"] -= 1
+            return "text"
+
+        monkeypatch.setattr(OpenAIWhisperBackend, "transcribe", fake_transcribe)
+        return stats
+
+    @pytest.fixture
+    def split_settings(self, monkeypatch) -> Settings:
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("TRANSCRIPTION_CHUNK_SECONDS", "120")
+        monkeypatch.setenv("TRANSCRIPTION_MAX_PARALLEL", "2")
+        return Settings()
+
+    async def test_long_recordings_become_several_whisper_requests(
+        self, whisper_requests, split_settings
+    ):
+        await build_backend(split_settings, "openai").transcribe(_recording(250), RATE)
+        assert whisper_requests["count"] == 3
+
+    async def test_parallelism_comes_from_settings(self, whisper_requests, split_settings):
+        await build_backend(split_settings, "openai").transcribe(_recording(250), RATE)
+        assert whisper_requests["peak"] == 2
+
+    async def test_short_recordings_stay_a_single_request(self, whisper_requests, split_settings):
+        await build_backend(split_settings, "openai").transcribe(_recording(10), RATE)
+        assert whisper_requests["count"] == 1
+
+    def test_unknown_backend_is_rejected(self, split_settings):
+        with pytest.raises(ValueError, match="'bogus'"):
+            build_backend(split_settings, "bogus")
+
+    def test_backend_flag_offers_the_registered_backends(self, settings):
+        with pytest.raises(SystemExit):
+            _parse(settings, "--backend", "bogus")
+        assert _parse(settings, "--backend", "openai").backend == "openai"
+
+    def test_backend_defaults_to_the_env(self, monkeypatch):
+        """A name other than the built-in default proves the env reaches the parser."""
+        monkeypatch.setitem(BACKENDS, "fake", lambda settings: None)
+        monkeypatch.setenv("TRANSCRIPTION_BACKEND", "fake")
+        assert _parse(Settings()).backend == "fake"

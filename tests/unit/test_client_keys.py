@@ -26,6 +26,16 @@ def _client(**kwargs) -> WhisperDictateClient:
     )
 
 
+class TestRecordingCap:
+    """The configured recording cap reaches the recorder's watchdog."""
+
+    def test_cap_is_forwarded_to_the_recorder(self):
+        assert _client(max_recording_seconds=90)._recorder.max_recording_seconds == 90
+
+    def test_default_cap_is_an_hour(self):
+        assert _client()._recorder.max_recording_seconds == 3600
+
+
 # ---------------------------------------------------------------------------
 # Key resolution
 # ---------------------------------------------------------------------------
