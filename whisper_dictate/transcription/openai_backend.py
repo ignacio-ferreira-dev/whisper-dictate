@@ -14,12 +14,7 @@ from typing import Optional
 
 from openai import AsyncOpenAI
 
-from whisper_dictate.transcription.base import TranscriptionBackend
-
-# paInt16 = 16-bit signed integer = 2 bytes per sample. This is a constant;
-# instantiating PyAudio just to query it caused a malloc crash when a second
-# PyAudio context was created while the recorder's context was still alive.
-_INT16_SAMPLE_WIDTH = 2
+from whisper_dictate.transcription.base import INT16_SAMPLE_WIDTH, TranscriptionBackend
 
 
 class OpenAIWhisperBackend(TranscriptionBackend):
@@ -31,6 +26,12 @@ class OpenAIWhisperBackend(TranscriptionBackend):
     """
 
     MODEL = "whisper-1"
+
+    #: The API documents a 25 MB upload limit and answers larger request
+    #: bodies with HTTP 413 ("Maximum content size limit (26214400)"). Staying
+    #: at 24 000 000 bytes of PCM leaves room under either reading for the WAV
+    #: header and the multipart envelope.
+    max_upload_bytes = 24_000_000
 
     def __init__(self, api_key: str, model: str = MODEL):
         """
@@ -85,7 +86,7 @@ class OpenAIWhisperBackend(TranscriptionBackend):
 
         with wave.open(tmp_path, "wb") as wf:  # pylint: disable=no-member
             wf.setnchannels(1)
-            wf.setsampwidth(_INT16_SAMPLE_WIDTH)
+            wf.setsampwidth(INT16_SAMPLE_WIDTH)
             wf.setframerate(sample_rate)
             wf.writeframes(b"".join(frames))
 

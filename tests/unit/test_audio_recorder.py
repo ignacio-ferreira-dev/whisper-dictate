@@ -95,13 +95,15 @@ class TestAutoStop:
     """The watchdog hands the recording over without duplicating the alert."""
 
     @pytest.fixture
-    def auto_stopped(self, monkeypatch):
+    def auto_stopped(self):
         """Run the watchdog once with the duration limit already exceeded."""
         on_auto_stop = MagicMock()
-        rec = AudioRecorder(alerts=MagicMock(), verbose=False, on_auto_stop=on_auto_stop)
+        rec = AudioRecorder(
+            alerts=MagicMock(), verbose=False, on_auto_stop=on_auto_stop,
+            max_recording_seconds=1,
+        )
         rec.sample_rate = 16000
-        monkeypatch.setattr(AudioRecorder, "MAX_RECORDING_SECONDS", 1)
-        rec._buffer = _chunks(1000)  # 64 s, well past the patched limit
+        rec._buffer = _chunks(1000)  # 64 s, well past the 1 s limit
         rec._recording = True
         rec._watchdog_loop()
         return rec, on_auto_stop

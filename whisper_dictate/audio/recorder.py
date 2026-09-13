@@ -27,6 +27,7 @@ from typing import Callable, List, Optional
 import pyaudio
 
 from whisper_dictate.audio.alerts import AudioAlertsManager
+from whisper_dictate.config import DEFAULT_MAX_RECORDING_MINUTES
 
 
 @contextlib.contextmanager
@@ -63,13 +64,13 @@ class AudioRecorder:
     FORMAT = pyaudio.paInt16
     CHANNELS: int = 1
     CHUNK_SIZE: int = 1024
-    MAX_RECORDING_SECONDS: int = 600  # 10 minutes; auto-stops and transcribes normally
 
     def __init__(
         self,
         alerts: Optional[AudioAlertsManager] = None,
         verbose: bool = True,
         on_auto_stop: Optional[Callable[[], None]] = None,
+        max_recording_seconds: float = DEFAULT_MAX_RECORDING_MINUTES * 60,
     ):
         """
         Args:
@@ -79,10 +80,13 @@ class AudioRecorder:
                           (max duration reached or stream error). Called from the
                           capture thread — must be thread-safe (e.g. schedule a coroutine
                           with run_coroutine_threadsafe).
+            max_recording_seconds: Recording auto-stops (and is transcribed normally)
+                          once it reaches this length.
         """
         self.alerts = alerts or AudioAlertsManager()
         self.verbose = verbose
         self._on_auto_stop = on_auto_stop
+        self.max_recording_seconds = max_recording_seconds
 
         self._pa: Optional[pyaudio.PyAudio] = None
         self._stream: Optional[pyaudio.Stream] = None
@@ -279,10 +283,10 @@ class AudioRecorder:
         auto_stopped = False
 
         while self._recording:
-            if self.get_duration() >= self.MAX_RECORDING_SECONDS:
+            if self.get_duration() >= self.max_recording_seconds:
                 self._log(
                     f"Maximum recording duration reached "
-                    f"({self.MAX_RECORDING_SECONDS // 60} min) — stopping and transcribing"
+                    f"({self.max_recording_seconds / 60:g} min) — stopping and transcribing"
                 )
                 self._recording = False
                 self._stop_stream()

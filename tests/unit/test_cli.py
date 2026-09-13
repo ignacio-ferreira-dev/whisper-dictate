@@ -7,8 +7,10 @@ resolution order that the README documents: command-line flag > .env > default.
 
 import pytest
 
-from whisper_dictate.__main__ import build_parser
+from whisper_dictate.__main__ import build_backend, build_parser
 from whisper_dictate.config import Settings
+from whisper_dictate.transcription.chunked import ChunkedTranscriptionBackend
+from whisper_dictate.transcription.openai_backend import OpenAIWhisperBackend
 
 pytestmark = pytest.mark.unit
 
@@ -80,3 +82,29 @@ class TestResolutionOrder:
 
     def test_alerts_are_enabled_by_default(self, settings):
         assert _parse(settings).no_alerts is False
+
+
+# ---------------------------------------------------------------------------
+# Backend wiring
+# ---------------------------------------------------------------------------
+
+
+class TestBuildBackend:
+    """The app transcribes through the chunking wrapper, configured from Settings."""
+
+    @pytest.fixture
+    def backend(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("TRANSCRIPTION_CHUNK_SECONDS", "120")
+        monkeypatch.setenv("TRANSCRIPTION_MAX_PARALLEL", "3")
+        return build_backend(Settings())
+
+    def test_long_recordings_are_split(self, backend):
+        assert isinstance(backend, ChunkedTranscriptionBackend)
+
+    def test_segments_go_to_whisper(self, backend):
+        assert isinstance(backend._inner, OpenAIWhisperBackend)
+
+    def test_split_and_parallelism_come_from_settings(self, backend):
+        assert backend._max_segment_seconds == 120
+        assert backend._max_parallel == 3

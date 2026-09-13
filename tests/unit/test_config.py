@@ -98,6 +98,42 @@ class TestSettingsEnvironmentOverrides:
 
 
 # ---------------------------------------------------------------------------
+# Long recordings
+# ---------------------------------------------------------------------------
+
+
+LONG_RECORDING_SETTINGS = [
+    ("MAX_RECORDING_MINUTES", "max_recording_minutes", 60),
+    ("TRANSCRIPTION_CHUNK_SECONDS", "transcription_chunk_seconds", 300),
+    ("TRANSCRIPTION_MAX_PARALLEL", "transcription_max_parallel", 4),
+]
+
+
+class TestLongRecordingSettings:
+    """The recording cap and the split/parallel knobs are read from the env and sanity-checked."""
+
+    @pytest.mark.parametrize("env_name,attribute,default", LONG_RECORDING_SETTINGS)
+    def test_default(self, env_name, attribute, default):
+        assert getattr(_settings_with_env(), attribute) == default
+
+    @pytest.mark.parametrize("env_name,attribute,default", LONG_RECORDING_SETTINGS)
+    def test_env_overrides_the_default(self, env_name, attribute, default):
+        assert getattr(_settings_with_env(**{env_name: "7"}), attribute) == 7
+
+    def test_recording_cap_is_exposed_in_seconds(self):
+        assert _settings_with_env(MAX_RECORDING_MINUTES="1.5").max_recording_seconds == 90
+
+    @pytest.mark.parametrize("value", ["0", "-3", "abc"])
+    @pytest.mark.parametrize("env_name,attribute,default", LONG_RECORDING_SETTINGS)
+    def test_invalid_values_fall_back_to_the_default(
+        self, capsys, env_name, attribute, default, value
+    ):
+        """Zero parallel requests would hang; zero minutes would stop at once."""
+        assert getattr(_settings_with_env(**{env_name: value}), attribute) == default
+        assert env_name in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
 

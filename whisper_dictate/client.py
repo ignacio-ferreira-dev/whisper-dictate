@@ -23,6 +23,7 @@ from pynput import keyboard as kb_module
 
 from whisper_dictate.audio.alerts import AudioAlertsManager
 from whisper_dictate.audio.recorder import AudioRecorder
+from whisper_dictate.config import DEFAULT_MAX_RECORDING_MINUTES
 from whisper_dictate.transcription.base import TranscriptionBackend
 from whisper_dictate.typing.text_typer import TextTyper
 
@@ -73,6 +74,7 @@ class WhisperDictateClient:
         alerts: Optional[AudioAlertsManager] = None,
         typer: Optional[TextTyper] = None,
         verbose: bool = True,
+        max_recording_seconds: float = DEFAULT_MAX_RECORDING_MINUTES * 60,
     ):
         """
         Args:
@@ -83,6 +85,7 @@ class WhisperDictateClient:
             alerts:   AudioAlertsManager instance (created with defaults if None).
             typer:    TextTyper instance (created with defaults if None).
             verbose:  When True, print status messages.
+            max_recording_seconds: Recordings auto-stop and transcribe at this length.
         """
         self._backend = backend
         self._language = language
@@ -100,6 +103,7 @@ class WhisperDictateClient:
             alerts=self._alerts,
             verbose=verbose,
             on_auto_stop=self._on_recorder_auto_stop,
+            max_recording_seconds=max_recording_seconds,
         )
         self._typer = typer or TextTyper()
 

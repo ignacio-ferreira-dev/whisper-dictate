@@ -80,13 +80,30 @@ def build_parser(settings: Settings) -> argparse.ArgumentParser:
     return parser
 
 
+def build_backend(settings: Settings):
+    """
+    Return the transcription backend: Whisper, wrapped so that recordings too
+    long for one request are split and transcribed in parallel.
+    """
+    from whisper_dictate.transcription.chunked import ChunkedTranscriptionBackend
+    from whisper_dictate.transcription.openai_backend import OpenAIWhisperBackend
+
+    return ChunkedTranscriptionBackend(
+        OpenAIWhisperBackend(
+            api_key=settings.openai_api_key,
+            model=settings.whisper_model,
+        ),
+        max_segment_seconds=settings.transcription_chunk_seconds,
+        max_parallel=settings.transcription_max_parallel,
+    )
+
+
 async def async_main(args: argparse.Namespace, settings: Settings) -> int:
     """Async entry point: builds and runs the WhisperDictateClient."""
     # Imported lazily: pulling in PyAudio/pynput costs noticeable startup time
     # and must not happen for `--help` or a failed config check.
     from whisper_dictate.audio.alerts import AudioAlertsManager
     from whisper_dictate.client import WhisperDictateClient
-    from whisper_dictate.transcription.openai_backend import OpenAIWhisperBackend
     from whisper_dictate.typing.text_typer import TextTyper
 
     try:
@@ -97,18 +114,14 @@ async def async_main(args: argparse.Namespace, settings: Settings) -> int:
 
     alerts = AudioAlertsManager(volume=args.volume, enabled=not args.no_alerts)
     typer = TextTyper(char_delay=args.char_delay, add_space_before=args.add_space)
-    backend = OpenAIWhisperBackend(
-        api_key=settings.openai_api_key,
-        model=settings.whisper_model,
-    )
-
     client = WhisperDictateClient(
-        backend=backend,
+        backend=build_backend(settings),
         hotkey=args.hotkey,
         quit_key=args.quit_key,
         language=args.language,
         alerts=alerts,
         typer=typer,
+        max_recording_seconds=settings.max_recording_seconds,
     )
 
     try:
