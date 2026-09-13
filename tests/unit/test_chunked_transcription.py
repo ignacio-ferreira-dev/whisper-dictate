@@ -22,6 +22,7 @@ from tests.unit.audio_samples import as_frames as _as_frames
 from tests.unit.audio_samples import silence as _silence
 from tests.unit.audio_samples import tone as _tone
 
+from whisper_dictate.config import DEFAULT_TRANSCRIPTION_CHUNK_SECONDS
 from whisper_dictate.transcription.base import TranscriptionBackend
 from whisper_dictate.transcription.chunked import (
     FAILED_SEGMENT_PLACEHOLDER,
@@ -276,11 +277,11 @@ class TestOpenAIUploadBudget:
 
     @pytest.mark.parametrize("rate", [16000, 44100])
     def test_every_segment_wav_is_under_the_api_limit(self, rate):
-        """At 44.1 kHz a 300 s segment is 26.5 MB — the byte budget must cut it."""
+        """At 44.1 kHz a default-length (600 s) segment is 52.9 MB — the byte budget must cut it."""
         with patch("whisper_dictate.transcription.openai_backend.AsyncOpenAI"):
             backend = OpenAIWhisperBackend(api_key="sk-test")
-        pcm = b"\x00\x00" * (rate * 320)
-        segments = split_frames([pcm], rate, max_seconds=300,
+        pcm = b"\x00\x00" * (rate * int(DEFAULT_TRANSCRIPTION_CHUNK_SECONDS + 20))
+        segments = split_frames([pcm], rate, max_seconds=DEFAULT_TRANSCRIPTION_CHUNK_SECONDS,
                                 max_bytes=backend.max_upload_bytes)
         for segment in segments:
             path = backend._write_temp_wav([segment], rate)

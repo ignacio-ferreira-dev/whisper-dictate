@@ -78,7 +78,7 @@ def _env_positive_number(name: str, default, cast):
 DEFAULT_MAX_RECORDING_MINUTES: float = 60
 DEFAULT_MAX_RECORDING_SECONDS: float = DEFAULT_MAX_RECORDING_MINUTES * 60
 #: Longer recordings are split into segments of at most this length.
-DEFAULT_TRANSCRIPTION_CHUNK_SECONDS: float = 300
+DEFAULT_TRANSCRIPTION_CHUNK_SECONDS: float = 600
 #: Most segments transcribed at the same time.
 DEFAULT_TRANSCRIPTION_MAX_PARALLEL: int = 4
 
