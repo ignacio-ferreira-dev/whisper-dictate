@@ -27,7 +27,7 @@ from typing import Callable, List, Optional
 import pyaudio
 
 from whisper_dictate.audio.alerts import AudioAlertsManager
-from whisper_dictate.config import DEFAULT_MAX_RECORDING_MINUTES
+from whisper_dictate.config import DEFAULT_MAX_RECORDING_SECONDS
 
 
 @contextlib.contextmanager
@@ -70,7 +70,7 @@ class AudioRecorder:
         alerts: Optional[AudioAlertsManager] = None,
         verbose: bool = True,
         on_auto_stop: Optional[Callable[[], None]] = None,
-        max_recording_seconds: float = DEFAULT_MAX_RECORDING_MINUTES * 60,
+        max_recording_seconds: float = DEFAULT_MAX_RECORDING_SECONDS,
     ):
         """
         Args:

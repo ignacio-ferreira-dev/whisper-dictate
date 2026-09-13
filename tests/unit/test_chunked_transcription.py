@@ -57,8 +57,10 @@ def _as_frames(pcm: bytes, chunk_bytes: int = 2048) -> list:
 class FakeBackend(TranscriptionBackend):
     """Records every request, tracks how many run at once, and can fail on demand."""
 
-    def __init__(self, texts=None, delays=None, fail_on=(), max_upload_bytes=None):
+    def __init__(self, texts=None, delays=None, fail_on=(), max_upload_bytes=None,
+                 error=RuntimeError):
         self.max_upload_bytes = max_upload_bytes
+        self._error = error
         self.calls = []
         self.in_flight = 0
         self.peak_in_flight = 0
@@ -74,7 +76,7 @@ class FakeBackend(TranscriptionBackend):
         try:
             await asyncio.sleep(self._delays.get(index, 0.01))
             if index in self._fail_on:
-                raise RuntimeError(f"segment {index} failed")
+                raise self._error(f"segment {index} failed")
             return self._texts[index] if self._texts else f"part{index}"
         finally:
             self.in_flight -= 1
@@ -138,7 +140,7 @@ class TestSplitFrames:
         segments = split_frames(_as_frames(_tone(10)), RATE, max_seconds=30, max_bytes=100_001)
         assert all(len(s) % 2 == 0 for s in segments)
 
-    @pytest.mark.parametrize("max_seconds", [0, -5])
+    @pytest.mark.parametrize("max_seconds", [0, -5, float("nan"), float("inf")])
     def test_rejects_a_non_positive_time_limit(self, max_seconds):
         with pytest.raises(ValueError, match="max_seconds"):
             split_frames([_tone(1)], RATE, max_seconds=max_seconds)
@@ -241,6 +243,17 @@ class TestFailures:
         with pytest.raises(RuntimeError, match="segment 0 failed"):
             await _chunked(inner).transcribe(_as_frames(_tone(100)), RATE)
 
+    async def test_failures_with_nothing_heard_elsewhere_raise(self):
+        """Placeholders around silence would type nothing but error markers."""
+        inner = FakeBackend(texts=["", "", "", ""], fail_on={1})
+        with pytest.raises(RuntimeError, match="segment 1 failed"):
+            await _chunked(inner).transcribe(_as_frames(_tone(100)), RATE)
+
+    async def test_a_cancelled_segment_is_not_turned_into_a_placeholder(self):
+        inner = FakeBackend(fail_on={1}, error=asyncio.CancelledError)
+        with pytest.raises(asyncio.CancelledError):
+            await _chunked(inner).transcribe(_as_frames(_tone(100)), RATE)
+
     async def test_a_short_recording_that_fails_still_raises(self):
         """A single request has nothing to salvage: behaviour is unchanged."""
         inner = FakeBackend(fail_on={0})
@@ -255,6 +268,7 @@ class TestFailures:
 
     @pytest.mark.parametrize("options,message", [
         ({"max_segment_seconds": 0}, "max_segment_seconds"),
+        ({"max_segment_seconds": float("inf")}, "max_segment_seconds"),
         ({"max_parallel": 0}, "max_parallel"),
     ])
     def test_rejects_invalid_limits(self, options, message):

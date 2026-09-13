@@ -99,7 +99,7 @@ Recordings stop automatically after 60 minutes (`MAX_RECORDING_MINUTES`) and are
 
 Whisper accepts at most 25 MB per request — about 13 minutes of audio. Anything longer than `TRANSCRIPTION_CHUNK_SECONDS` (5 minutes by default) is split into segments, which are sent in parallel (`TRANSCRIPTION_MAX_PARALLEL` at a time) and joined back in order before typing. Each cut is placed at the quietest moment in the 3 seconds before the boundary, so words are not sliced in half. Short dictations are unaffected: they still go out as a single request.
 
-If a segment still fails after the API client's automatic retries, its place in the text is filled with `[error processing this extract of voice command]` and the rest of the dictation is typed normally. Only when every segment fails (or a short, single-request dictation fails) is nothing typed and the error beep played.
+If a segment still fails after the API client's automatic retries, its place in the text is filled with `[error processing this extract of voice command]` and the rest of the dictation is typed normally. Only when no segment produced any text (or a short, single-request dictation fails) is nothing typed and the error beep played.
 
 The quit sound is the stop beep played twice, the second starting half a second into the first so they overlap. That stutter is what tells you the app closed rather than just finishing a recording.
 
@@ -197,8 +197,7 @@ class MyBackend(TranscriptionBackend):
 ```
 
 3. If the service caps the upload size, set the `max_upload_bytes` class attribute — long recordings are then split to fit
-4. Add your backend name to the `--backend` choices in `whisper_dictate/__main__.py`
-5. Instantiate it in `build_backend()` in `whisper_dictate/__main__.py`, choosing it from the selected backend name
+4. Register a factory for it in `BACKENDS` in `whisper_dictate/__main__.py` — its name then becomes a `--backend` choice and a valid `TRANSCRIPTION_BACKEND` value
 
 ---
 
@@ -210,10 +209,10 @@ All settings can be set in `.env` (copy from `.env.example`) or as environment v
 |----------|---------|-------------|
 | `OPENAI_API_KEY` | *(required)* | Your OpenAI API key |
 | `WHISPER_MODEL` | `whisper-1` | OpenAI Whisper model |
+| `TRANSCRIPTION_BACKEND` | `openai` | Transcription backend (same as `--backend`) |
 | `DEFAULT_LANGUAGE` | `auto` | ISO 639-1 code or `auto` |
 | `HOTKEY` | `f9` | Key that starts/stops recording |
 | `QUIT_KEY` | `home` | Key that quits the application |
-| `SAMPLE_RATE` | `16000` | Microphone sample rate in Hz |
 | `MAX_RECORDING_MINUTES` | `60` | Recordings auto-stop and transcribe at this length |
 | `TRANSCRIPTION_CHUNK_SECONDS` | `300` | Longer recordings are split into segments of at most this length |
 | `TRANSCRIPTION_MAX_PARALLEL` | `4` | Most segments transcribed at the same time |

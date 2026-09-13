@@ -36,10 +36,12 @@ REPEATS = 3
 class CountingBackend(OpenAIWhisperBackend):
     """The real backend, counting the requests it sends."""
 
-    requests = 0
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.requests = 0
 
     async def transcribe(self, frames, sample_rate, language=None):
-        type(self).requests += 1
+        self.requests += 1
         return await super().transcribe(frames, sample_rate, language)
 
 
@@ -54,5 +56,5 @@ async def test_long_audio_is_transcribed_as_parallel_segments_in_order():
     )
     text = await backend.transcribe([clip * REPEATS], rate, language="en")
 
-    assert CountingBackend.requests == REPEATS
+    assert inner.requests == REPEATS
     assert text.lower().count("breakfast") == REPEATS

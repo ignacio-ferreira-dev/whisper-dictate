@@ -15,6 +15,7 @@ than at a fixed offset, so a word is not sliced in half between two requests.
 """
 
 import asyncio
+import math
 import time
 from array import array
 from typing import List, Optional
@@ -56,8 +57,8 @@ def split_frames(
         The segments, in order. Joined back together they are exactly the
         input audio. Empty list if there is no audio.
     """
-    if max_seconds <= 0:
-        raise ValueError(f"max_seconds must be positive, got {max_seconds}")
+    if not math.isfinite(max_seconds) or max_seconds <= 0:
+        raise ValueError(f"max_seconds must be a positive finite number, got {max_seconds}")
     if max_bytes is not None and max_bytes < INT16_SAMPLE_WIDTH:
         raise ValueError(f"max_bytes must hold at least one sample, got {max_bytes}")
 
@@ -133,8 +134,10 @@ class ChunkedTranscriptionBackend(TranscriptionBackend):
             max_parallel:        Most requests in flight at the same time.
             verbose:             When True, print status messages.
         """
-        if max_segment_seconds <= 0:
-            raise ValueError(f"max_segment_seconds must be positive, got {max_segment_seconds}")
+        if not math.isfinite(max_segment_seconds) or max_segment_seconds <= 0:
+            raise ValueError(
+                f"max_segment_seconds must be a positive finite number, got {max_segment_seconds}"
+            )
         if max_parallel < 1:
             raise ValueError(f"max_parallel must be at least 1, got {max_parallel}")
         self._inner = inner
@@ -157,7 +160,8 @@ class ChunkedTranscriptionBackend(TranscriptionBackend):
 
         Raises:
             Exception: when the audio is a single request and it fails, or when
-                       every segment failed — there is nothing worth typing.
+                       segments failed and the others heard nothing — a line
+                       of placeholders is not worth typing.
         """
         segments = split_frames(
             frames, sample_rate, self._max_segment_seconds, self._inner.max_upload_bytes
@@ -179,17 +183,24 @@ class ChunkedTranscriptionBackend(TranscriptionBackend):
             *(transcribe_segment(segment) for segment in segments),
             return_exceptions=True,
         )
-        failures = [r for r in results if isinstance(r, BaseException)]
-        if len(failures) == len(results):
-            raise failures[0]
+        # Only ordinary errors become placeholders: a cancellation or an
+        # interrupt must still stop the transcription.
+        for result in results:
+            if isinstance(result, BaseException) and not isinstance(result, Exception):
+                raise result
 
+        failures = [result for result in results if isinstance(result, Exception)]
         texts = []
+        heard_anything = False
         for number, result in enumerate(results, start=1):
-            if isinstance(result, BaseException):
+            if isinstance(result, Exception):
                 self._log(f"Segment {number}/{len(results)} failed ({result}) - typing a placeholder")
                 texts.append(FAILED_SEGMENT_PLACEHOLDER)
             elif result and result.strip():
                 texts.append(result.strip())
+                heard_anything = True
+        if failures and not heard_anything:
+            raise failures[0]
         return " ".join(texts)
 
     def _log(self, msg: str) -> None:

@@ -23,7 +23,7 @@ from pynput import keyboard as kb_module
 
 from whisper_dictate.audio.alerts import AudioAlertsManager
 from whisper_dictate.audio.recorder import AudioRecorder
-from whisper_dictate.config import DEFAULT_MAX_RECORDING_MINUTES
+from whisper_dictate.config import DEFAULT_MAX_RECORDING_SECONDS
 from whisper_dictate.transcription.base import TranscriptionBackend
 from whisper_dictate.typing.text_typer import TextTyper
 
@@ -74,7 +74,7 @@ class WhisperDictateClient:
         alerts: Optional[AudioAlertsManager] = None,
         typer: Optional[TextTyper] = None,
         verbose: bool = True,
-        max_recording_seconds: float = DEFAULT_MAX_RECORDING_MINUTES * 60,
+        max_recording_seconds: float = DEFAULT_MAX_RECORDING_SECONDS,
     ):
         """
         Args:

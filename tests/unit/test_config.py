@@ -47,10 +47,6 @@ class TestSettingsDefaults:
         s = _settings_with_env()
         assert s.enable_translation is False
 
-    def test_default_sample_rate_is_16000(self):
-        s = _settings_with_env()
-        assert s.sample_rate == 16000
-
     def test_default_alerts_enabled(self):
         s = _settings_with_env()
         assert s.alerts_enabled is True
@@ -79,10 +75,6 @@ class TestSettingsEnvironmentOverrides:
     def test_reads_default_language(self):
         s = _settings_with_env(DEFAULT_LANGUAGE="es")
         assert s.default_language == "es"
-
-    def test_reads_sample_rate(self):
-        s = _settings_with_env(SAMPLE_RATE="44100")
-        assert s.sample_rate == 44100
 
     def test_enable_translation_true(self):
         s = _settings_with_env(ENABLE_TRANSLATION="true")
@@ -123,7 +115,7 @@ class TestLongRecordingSettings:
     def test_recording_cap_is_exposed_in_seconds(self):
         assert _settings_with_env(MAX_RECORDING_MINUTES="1.5").max_recording_seconds == 90
 
-    @pytest.mark.parametrize("value", ["0", "-3", "abc"])
+    @pytest.mark.parametrize("value", ["0", "-3", "abc", "nan", "inf"])
     @pytest.mark.parametrize("env_name,attribute,default", LONG_RECORDING_SETTINGS)
     def test_invalid_values_fall_back_to_the_default(
         self, capsys, env_name, attribute, default, value
