@@ -6,6 +6,8 @@ duration maths and the watchdog (segment beep, cancel at the cap) can be checked
 Hardware behaviour is covered by tests/integration/test_audio_recorder.py.
 """
 
+import threading
+
 import pytest
 from unittest.mock import MagicMock
 
@@ -108,11 +110,25 @@ class TestCancelAtCap:
     """A recording nobody stopped is discarded at the cap, never transcribed."""
 
     @pytest.fixture
-    def cancelled(self) -> AudioRecorder:
+    def cancelled(self, monkeypatch) -> AudioRecorder:
         """Run the watchdog with the cap already exceeded (64 s against 1 s)."""
+        monkeypatch.setattr(AudioRecorder, "WATCHDOG_INTERVAL_SECONDS", 0)
         rec = _recording(64, max_recording_seconds=1)
         rec._watchdog_loop()
         return rec
+
+    def test_the_watchdog_stops_with_the_recording(self, monkeypatch):
+        """
+        A watchdog that sleeps on after cancelling would still be running when
+        the next hotkey press starts a recording, and would then watch that one
+        too: two beep schedules and two cancels for one recording.
+        """
+        monkeypatch.setattr(AudioRecorder, "WATCHDOG_INTERVAL_SECONDS", 0.05)
+        rec = _recording(64, max_recording_seconds=1)
+        watchdog = threading.Thread(target=rec._watchdog_loop, daemon=True)
+        watchdog.start()
+        watchdog.join(timeout=1.0)
+        assert watchdog.is_alive() is False
 
     def test_stops_recording(self, cancelled):
         assert cancelled.is_recording is False

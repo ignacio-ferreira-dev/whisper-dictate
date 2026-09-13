@@ -17,7 +17,7 @@ F9 pressed    →  audio alert (stop)   →  audio sent to Whisper API
 HOME pressed  →  two overlapping beeps →  app quits
 ```
 
-Long recordings are split into segments that are transcribed in parallel and joined back in order, so they are no longer limited by Whisper's 25 MB upload cap. A short beep marks each new 10-minute segment while you keep talking, and a recording left running for 30 minutes is cancelled as a safety net.
+Long recordings are split into segments that are transcribed in parallel and joined back in order, so they are no longer limited by Whisper's 25 MB upload cap. A short beep every 10 minutes tells you it is still recording, and a recording left running for 30 minutes is cancelled as a safety net.
 
 ---
 
@@ -93,7 +93,7 @@ whisper-dictate
 | `F9` again | Stop recording, transcribe, type at cursor |
 | `HOME` | Quit (plays two overlapping beeps) |
 
-A recording keeps going until you press F9 again. Every 10 minutes (`TRANSCRIPTION_CHUNK_SECONDS`) a short beep tells you a new segment has started and it is still recording. A recording still running after 30 minutes (`MAX_RECORDING_MINUTES`) is assumed to be forgotten and is **cancelled**: the audio is discarded, nothing is typed, and the error beep plays.
+A recording keeps going until you press F9 again. Every 10 minutes (`TRANSCRIPTION_CHUNK_SECONDS`) a short beep tells you it is still recording. That is the segment length the transcription aims for; the actual cuts can be shorter when the 25 MB upload budget binds first (at sample rates above 20 kHz), so treat the beep as "still going", not as an exact marker of where the audio was split. A recording still running after 30 minutes (`MAX_RECORDING_MINUTES`) is assumed to be forgotten and is **cancelled**: the audio is discarded, nothing is typed, and the error beep plays.
 
 ### Long recordings
 

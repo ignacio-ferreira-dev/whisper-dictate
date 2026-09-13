@@ -236,11 +236,6 @@ class AudioRecorder:
         """True while audio capture is active."""
         return self._recording
 
-    @property
-    def has_pending_frames(self) -> bool:
-        """True if there are buffered frames ready to transcribe but not yet consumed."""
-        return bool(self._buffer) and not self._recording
-
     def get_duration(self) -> float:
         """Return duration in seconds of currently buffered audio."""
         return self.frames_duration(self._buffer)
@@ -285,6 +280,12 @@ class AudioRecorder:
         next_beep = self.segment_seconds
         while self._recording:
             next_beep = self._watchdog_tick(next_beep)
+            if not self._recording:
+                # Cancelled by the tick. Leaving now matters: sleeping first
+                # would let a hotkey press start a recording that this thread
+                # then watches as well as its own successor — two watchdogs,
+                # two beep schedules, two cancels.
+                break
             time.sleep(self.WATCHDOG_INTERVAL_SECONDS)
 
     def _watchdog_tick(self, next_beep: Optional[float]) -> Optional[float]:
@@ -315,7 +316,7 @@ class AudioRecorder:
         self._buffer = []
         self._log(
             f"Recording cancelled - still running after "
-            f"{self.max_recording_seconds / 60:g} min, audio discarded"
+            f"{self.max_recording_seconds / 60:.1f} min, audio discarded"
         )
         self.alerts.play_error()
 

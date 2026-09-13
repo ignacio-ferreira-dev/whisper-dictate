@@ -151,9 +151,13 @@ class AudioAlertsManager:
     #: whole; the overlap still happens, the exit is just slower.
     SHUTDOWN_BEEP_SECONDS: float = 0.9
 
-    #: The segment beep is the start sound cut to its audible part
-    #: (recording_start.mp3 goes silent at ~0.67 s), so it reads as a short
-    #: "still recording" tick rather than as a new recording starting.
+    #: The segment tick is the start sound played twice, overlapping, for the
+    #: same reason the shutdown sound is: played once it is indistinguishable
+    #: from "a recording just started", which is the one other thing that sound
+    #: means. Each tick is cut to the sound's audible part (recording_start.mp3
+    #: goes silent at ~0.67 s) so the pair stays short.
+    SEGMENT_BEEP_REPEATS: int = 2
+    SEGMENT_BEEP_OFFSET_SECONDS: float = 0.25
     SEGMENT_BEEP_SECONDS: float = 0.7
 
     def __init__(
@@ -202,13 +206,24 @@ class AudioAlertsManager:
 
     def play_segment(self) -> None:
         """
-        Play a short beep, asynchronously, while a recording keeps going.
+        Play a short double tick, asynchronously, while a recording keeps going.
 
         Marks that a long recording has started a new transcription segment.
         Asynchronous because it is called from the recorder's watchdog thread,
-        which must keep checking the recording's length while it plays.
+        which must keep watching the recording's length while it plays.
         """
-        self._play_async("start", max_seconds=self.SEGMENT_BEEP_SECONDS)
+        if not self.enabled:
+            return
+        threading.Thread(
+            target=self._play_overlapping,
+            args=(
+                "start",
+                self.SEGMENT_BEEP_REPEATS,
+                self.SEGMENT_BEEP_OFFSET_SECONDS,
+                self.SEGMENT_BEEP_SECONDS,
+            ),
+            daemon=True,
+        ).start()
 
     def play_shutdown(self) -> None:
         """
@@ -241,19 +256,17 @@ class AudioAlertsManager:
             return
         self._play_event(event)
 
-    def _play_async(self, event: str, max_seconds: Optional[float] = None) -> None:
+    def _play_async(self, event: str) -> None:
         """Spawn a daemon thread so playback never blocks the caller."""
         if not self.enabled:
             return
-        threading.Thread(
-            target=self._play_event, args=(event, max_seconds), daemon=True
-        ).start()
+        threading.Thread(target=self._play_event, args=(event,), daemon=True).start()
 
-    def _play_event(self, event: str, max_seconds: Optional[float] = None) -> None:
+    def _play_event(self, event: str) -> None:
         """Play the sound file for the given event via subprocess."""
         path = _sound_path(self._SOUND_MAP[event])
         if os.path.isfile(path):
-            self._play_file(path, max_seconds)
+            self._play_file(path)
 
     def _play_overlapping(
         self, event: str, repeats: int, offset: float, max_seconds: Optional[float]

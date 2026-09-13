@@ -10,7 +10,7 @@ import asyncio
 import pytest
 
 from tests.unit.audio_samples import RATE, silence
-from whisper_dictate.__main__ import BACKENDS, build_backend, build_parser
+from whisper_dictate.__main__ import BACKENDS, build_backend, build_parser, recording_limits
 from whisper_dictate.config import Settings
 from whisper_dictate.transcription.openai_backend import OpenAIWhisperBackend
 
@@ -94,6 +94,22 @@ class TestResolutionOrder:
 # ---------------------------------------------------------------------------
 # Backend wiring
 # ---------------------------------------------------------------------------
+
+
+class TestRecordingLimits:
+    """The recorder's limits come from Settings, not from hardcoded values."""
+
+    @pytest.fixture
+    def limits(self, monkeypatch) -> dict:
+        monkeypatch.setenv("MAX_RECORDING_MINUTES", "5")
+        monkeypatch.setenv("TRANSCRIPTION_CHUNK_SECONDS", "120")
+        return recording_limits(Settings())
+
+    def test_cap_comes_from_the_env_in_seconds(self, limits):
+        assert limits["max_recording_seconds"] == 300
+
+    def test_the_beep_marks_the_transcription_segment(self, limits):
+        assert limits["segment_seconds"] == 120
 
 
 class TestBuildBackend:

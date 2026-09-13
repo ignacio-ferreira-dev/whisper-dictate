@@ -99,28 +99,45 @@ class TestDisabledMode:
 
 
 class TestSegmentBeep:
-    """play_segment() is a short, non-blocking tick made from the start sound."""
+    """play_segment() is a short double tick that never blocks the watchdog."""
 
-    def test_plays_the_start_sound_cut_short(self):
+    def test_plays_the_start_sound_twice(self, monkeypatch):
+        monkeypatch.setattr(AudioAlertsManager, "SEGMENT_BEEP_OFFSET_SECONDS", 0.01)
         a = AudioAlertsManager(player=_FFPLAY)
-        with patch.object(a, "_play_file") as play_file:
-            a._play_event("start", a.SEGMENT_BEEP_SECONDS)
-        play_file.assert_called_once_with(_sound_path("recording_start.mp3"), 0.7)
+        with patch.object(a, "_spawn", return_value=_fake_process()) as mock_spawn, \
+             patch("os.path.isfile", return_value=True):
+            a._play_overlapping("start", a.SEGMENT_BEEP_REPEATS, 0.01, a.SEGMENT_BEEP_SECONDS)
+        assert mock_spawn.call_count == AudioAlertsManager.SEGMENT_BEEP_REPEATS
+        for call_args in mock_spawn.call_args_list:
+            assert call_args[0][0][-1].endswith("recording_start.mp3")
 
-    def test_is_played_in_a_background_thread(self):
-        """The watchdog calls it and must keep checking the recording meanwhile."""
+    def test_one_tick_alone_would_be_the_start_beep(self):
+        """
+        The pair is the whole point: recording_start.mp3 played once means
+        "a recording just started", which is the one other thing it means.
+        """
+        assert AudioAlertsManager.SEGMENT_BEEP_REPEATS > 1
+        assert (AudioAlertsManager.SEGMENT_BEEP_OFFSET_SECONDS
+                < AudioAlertsManager.SEGMENT_BEEP_SECONDS)
+
+    def test_each_tick_is_cut_short(self):
+        a = AudioAlertsManager(player=_FFPLAY)
+        command = a._command_for(_sound_path("recording_start.mp3"), a.SEGMENT_BEEP_SECONDS)
+        assert "-t" in command
+        assert "0.7" in command
+
+    def test_runs_in_a_background_thread(self):
+        """The watchdog calls it and must keep watching the recording meanwhile."""
         a = AudioAlertsManager(player=_FFPLAY)
         with patch("whisper_dictate.audio.alerts.threading.Thread") as mock_thread:
             a.play_segment()
         mock_thread.assert_called_once_with(
-            target=a._play_event, args=("start", a.SEGMENT_BEEP_SECONDS), daemon=True
+            target=a._play_overlapping,
+            args=("start", a.SEGMENT_BEEP_REPEATS, a.SEGMENT_BEEP_OFFSET_SECONDS,
+                  a.SEGMENT_BEEP_SECONDS),
+            daemon=True,
         )
         mock_thread.return_value.start.assert_called_once_with()
-
-    def test_the_player_is_told_to_stop_early(self):
-        a = AudioAlertsManager(player=_FFPLAY)
-        command = a._command_for(_sound_path("recording_start.mp3"), a.SEGMENT_BEEP_SECONDS)
-        assert "0.7" in command
 
     def test_is_a_no_op_when_disabled(self):
         a = AudioAlertsManager(enabled=False)
