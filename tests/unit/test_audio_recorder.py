@@ -123,11 +123,14 @@ class TestCancelAtCap:
         the next hotkey press starts a recording, and would then watch that one
         too: two beep schedules and two cancels for one recording.
         """
-        monkeypatch.setattr(AudioRecorder, "WATCHDOG_INTERVAL_SECONDS", 0.05)
+        # The interval is far longer than the join: a loop that sleeps before
+        # re-testing the flag is then still alive when we look, which is what
+        # the bug was. A short interval passes either way and proves nothing.
+        monkeypatch.setattr(AudioRecorder, "WATCHDOG_INTERVAL_SECONDS", 5)
         rec = _recording(64, max_recording_seconds=1)
         watchdog = threading.Thread(target=rec._watchdog_loop, daemon=True)
         watchdog.start()
-        watchdog.join(timeout=1.0)
+        watchdog.join(timeout=0.5)
         assert watchdog.is_alive() is False
 
     def test_stops_recording(self, cancelled):

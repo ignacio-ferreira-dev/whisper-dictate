@@ -101,8 +101,7 @@ class TestDisabledMode:
 class TestSegmentBeep:
     """play_segment() is a short double tick that never blocks the watchdog."""
 
-    def test_plays_the_start_sound_twice(self, monkeypatch):
-        monkeypatch.setattr(AudioAlertsManager, "SEGMENT_BEEP_OFFSET_SECONDS", 0.01)
+    def test_plays_the_start_sound_twice(self):
         a = AudioAlertsManager(player=_FFPLAY)
         with patch.object(a, "_spawn", return_value=_fake_process()) as mock_spawn, \
              patch("os.path.isfile", return_value=True):

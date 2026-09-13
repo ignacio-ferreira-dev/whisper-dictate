@@ -194,15 +194,15 @@ class AudioAlertsManager:
 
     def play_stop(self) -> None:
         """Play the recording-end sound asynchronously."""
-        self._play_async("stop")
+        self._play_async(self._play_event, "stop")
 
     def play_done(self) -> None:
         """Play the transcription-success sound asynchronously."""
-        self._play_async("done")
+        self._play_async(self._play_event, "done")
 
     def play_error(self) -> None:
         """Play the error sound asynchronously."""
-        self._play_async("error")
+        self._play_async(self._play_event, "error")
 
     def play_segment(self) -> None:
         """
@@ -212,18 +212,13 @@ class AudioAlertsManager:
         Asynchronous because it is called from the recorder's watchdog thread,
         which must keep watching the recording's length while it plays.
         """
-        if not self.enabled:
-            return
-        threading.Thread(
-            target=self._play_overlapping,
-            args=(
-                "start",
-                self.SEGMENT_BEEP_REPEATS,
-                self.SEGMENT_BEEP_OFFSET_SECONDS,
-                self.SEGMENT_BEEP_SECONDS,
-            ),
-            daemon=True,
-        ).start()
+        self._play_async(
+            self._play_overlapping,
+            "start",
+            self.SEGMENT_BEEP_REPEATS,
+            self.SEGMENT_BEEP_OFFSET_SECONDS,
+            self.SEGMENT_BEEP_SECONDS,
+        )
 
     def play_shutdown(self) -> None:
         """
@@ -256,11 +251,11 @@ class AudioAlertsManager:
             return
         self._play_event(event)
 
-    def _play_async(self, event: str) -> None:
-        """Spawn a daemon thread so playback never blocks the caller."""
+    def _play_async(self, target, *args) -> None:
+        """Run a playback call in a daemon thread so it never blocks the caller."""
         if not self.enabled:
             return
-        threading.Thread(target=self._play_event, args=(event,), daemon=True).start()
+        threading.Thread(target=target, args=args, daemon=True).start()
 
     def _play_event(self, event: str) -> None:
         """Play the sound file for the given event via subprocess."""
