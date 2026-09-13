@@ -57,8 +57,7 @@ def split_frames(
         The segments, in order. Joined back together they are exactly the
         input audio. Empty list if there is no audio.
     """
-    if not math.isfinite(max_seconds) or max_seconds <= 0:
-        raise ValueError(f"max_seconds must be a positive finite number, got {max_seconds}")
+    _require_positive_finite("max_seconds", max_seconds)
     if max_bytes is not None and max_bytes < INT16_SAMPLE_WIDTH:
         raise ValueError(f"max_bytes must hold at least one sample, got {max_bytes}")
 
@@ -87,6 +86,12 @@ def split_frames(
     if start < len(pcm):
         segments.append(pcm[start:])
     return segments
+
+
+def _require_positive_finite(name: str, value: float) -> None:
+    """Reject 0, negatives, nan and inf: none of them is a usable segment length."""
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{name} must be a positive finite number, got {value}")
 
 
 def _samples_to_bytes(samples: int) -> int:
@@ -134,10 +139,7 @@ class ChunkedTranscriptionBackend(TranscriptionBackend):
             max_parallel:        Most requests in flight at the same time.
             verbose:             When True, print status messages.
         """
-        if not math.isfinite(max_segment_seconds) or max_segment_seconds <= 0:
-            raise ValueError(
-                f"max_segment_seconds must be a positive finite number, got {max_segment_seconds}"
-            )
+        _require_positive_finite("max_segment_seconds", max_segment_seconds)
         if max_parallel < 1:
             raise ValueError(f"max_parallel must be at least 1, got {max_parallel}")
         self._inner = inner

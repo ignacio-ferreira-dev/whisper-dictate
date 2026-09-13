@@ -9,7 +9,8 @@ import asyncio
 
 import pytest
 
-from whisper_dictate.__main__ import build_backend, build_parser
+from tests.unit.audio_samples import RATE, silence
+from whisper_dictate.__main__ import BACKENDS, build_backend, build_parser
 from whisper_dictate.config import Settings
 from whisper_dictate.transcription.openai_backend import OpenAIWhisperBackend
 
@@ -27,6 +28,11 @@ def settings(monkeypatch) -> Settings:
 
 def _parse(settings: Settings, *argv):
     return build_parser(settings).parse_args(list(argv))
+
+
+def _recording(seconds: int) -> list:
+    """A silent recording as the single frame the backend receives."""
+    return [silence(seconds)]
 
 
 # ---------------------------------------------------------------------------
@@ -90,13 +96,6 @@ class TestResolutionOrder:
 # ---------------------------------------------------------------------------
 
 
-RATE = 16000
-
-
-def _silence(seconds: int) -> list:
-    return [b"\x00\x00" * RATE * seconds]
-
-
 class TestBuildBackend:
     """The selected backend transcribes through the chunking wrapper, configured from Settings."""
 
@@ -126,15 +125,15 @@ class TestBuildBackend:
     async def test_long_recordings_become_several_whisper_requests(
         self, whisper_requests, split_settings
     ):
-        await build_backend(split_settings, "openai").transcribe(_silence(250), RATE)
+        await build_backend(split_settings, "openai").transcribe(_recording(250), RATE)
         assert whisper_requests["count"] == 3
 
     async def test_parallelism_comes_from_settings(self, whisper_requests, split_settings):
-        await build_backend(split_settings, "openai").transcribe(_silence(250), RATE)
+        await build_backend(split_settings, "openai").transcribe(_recording(250), RATE)
         assert whisper_requests["peak"] == 2
 
     async def test_short_recordings_stay_a_single_request(self, whisper_requests, split_settings):
-        await build_backend(split_settings, "openai").transcribe(_silence(10), RATE)
+        await build_backend(split_settings, "openai").transcribe(_recording(10), RATE)
         assert whisper_requests["count"] == 1
 
     def test_unknown_backend_is_rejected(self, split_settings):
@@ -147,5 +146,7 @@ class TestBuildBackend:
         assert _parse(settings, "--backend", "openai").backend == "openai"
 
     def test_backend_defaults_to_the_env(self, monkeypatch):
-        monkeypatch.setenv("TRANSCRIPTION_BACKEND", "openai")
-        assert _parse(Settings()).backend == "openai"
+        """A name other than the built-in default proves the env reaches the parser."""
+        monkeypatch.setitem(BACKENDS, "fake", lambda settings: None)
+        monkeypatch.setenv("TRANSCRIPTION_BACKEND", "fake")
+        assert _parse(Settings()).backend == "fake"

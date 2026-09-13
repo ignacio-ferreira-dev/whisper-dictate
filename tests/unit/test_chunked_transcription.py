@@ -13,10 +13,14 @@ The wrapped backend is a small fake — no network calls are made.
 
 import asyncio
 import os
-from array import array
 from unittest.mock import patch
 
 import pytest
+
+from tests.unit.audio_samples import RATE
+from tests.unit.audio_samples import as_frames as _as_frames
+from tests.unit.audio_samples import silence as _silence
+from tests.unit.audio_samples import tone as _tone
 
 from whisper_dictate.transcription.base import TranscriptionBackend
 from whisper_dictate.transcription.chunked import (
@@ -30,28 +34,12 @@ from whisper_dictate.transcription.openai_backend import OpenAIWhisperBackend
 
 pytestmark = pytest.mark.unit
 
-RATE = 16000
 BYTES_PER_SECOND = RATE * 2
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _tone(seconds: float, rate: int = RATE) -> bytes:
-    """A loud square wave: every window has the same, high energy."""
-    samples = int(seconds * rate)
-    return (array("h", [8000, -8000]) * (samples // 2 + 1))[:samples].tobytes()
-
-
-def _silence(seconds: float, rate: int = RATE) -> bytes:
-    return b"\x00\x00" * int(seconds * rate)
-
-
-def _as_frames(pcm: bytes, chunk_bytes: int = 2048) -> list:
-    """Cut PCM into recorder-sized chunks, like AudioRecorder hands them over."""
-    return [pcm[i:i + chunk_bytes] for i in range(0, len(pcm), chunk_bytes)]
 
 
 class FakeBackend(TranscriptionBackend):
