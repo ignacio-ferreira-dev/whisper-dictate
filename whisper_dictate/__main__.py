@@ -140,6 +140,8 @@ async def async_main(args: argparse.Namespace, settings: Settings) -> int:
         alerts=alerts,
         typer=typer,
         max_recording_seconds=settings.max_recording_seconds,
+        # The beep marks the length at which the transcription is split.
+        segment_seconds=settings.transcription_chunk_seconds,
     )
 
     try:

@@ -75,6 +75,7 @@ class WhisperDictateClient:
         typer: Optional[TextTyper] = None,
         verbose: bool = True,
         max_recording_seconds: float = DEFAULT_MAX_RECORDING_SECONDS,
+        segment_seconds: Optional[float] = None,
     ):
         """
         Args:
@@ -85,7 +86,10 @@ class WhisperDictateClient:
             alerts:   AudioAlertsManager instance (created with defaults if None).
             typer:    TextTyper instance (created with defaults if None).
             verbose:  When True, print status messages.
-            max_recording_seconds: Recordings auto-stop and transcribe at this length.
+            max_recording_seconds: A recording still running at this length is
+                      cancelled and discarded.
+            segment_seconds: A short beep marks each new segment of this length
+                      while the recording keeps going (None: no beep).
         """
         self._backend = backend
         self._language = language
@@ -102,8 +106,8 @@ class WhisperDictateClient:
         self._recorder = AudioRecorder(
             alerts=self._alerts,
             verbose=verbose,
-            on_auto_stop=self._on_recorder_auto_stop,
             max_recording_seconds=max_recording_seconds,
+            segment_seconds=segment_seconds,
         )
         self._typer = typer or TextTyper()
 
@@ -177,16 +181,6 @@ class WhisperDictateClient:
             # listener and the app would silently go deaf to the hotkey.
             self._log(f"Key handling error: {e}")
 
-    def _on_recorder_auto_stop(self) -> None:
-        """
-        Called from the recorder's capture thread when recording stops automatically
-        (max duration or stream error). Schedules transcription on the event loop.
-        """
-        if self._loop:
-            asyncio.run_coroutine_threadsafe(
-                self._transcribe_pending(), self._loop
-            )
-
     async def _toggle_recording(self) -> None:
         """Start or stop recording depending on the current state."""
         if self._recorder.is_recording:
@@ -197,15 +191,6 @@ class WhisperDictateClient:
                 self._log("No audio captured")
         else:
             self._recorder.start_recording()
-
-    async def _transcribe_pending(self) -> None:
-        """Transcribe frames that were buffered by an auto-stopped recording."""
-        if self._recorder.is_recording:
-            # A new recording started before the callback ran — leave it alone.
-            return
-        frames = self._recorder.stop_recording()
-        if frames:
-            await self._transcribe_and_type(frames)
 
     # ------------------------------------------------------------------
     # Transcription + typing

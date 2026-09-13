@@ -151,6 +151,11 @@ class AudioAlertsManager:
     #: whole; the overlap still happens, the exit is just slower.
     SHUTDOWN_BEEP_SECONDS: float = 0.9
 
+    #: The segment beep is the start sound cut to its audible part
+    #: (recording_start.mp3 goes silent at ~0.67 s), so it reads as a short
+    #: "still recording" tick rather than as a new recording starting.
+    SEGMENT_BEEP_SECONDS: float = 0.7
+
     def __init__(
         self,
         volume: float = 0.8,
@@ -195,6 +200,16 @@ class AudioAlertsManager:
         """Play the error sound asynchronously."""
         self._play_async("error")
 
+    def play_segment(self) -> None:
+        """
+        Play a short beep, asynchronously, while a recording keeps going.
+
+        Marks that a long recording has started a new transcription segment.
+        Asynchronous because it is called from the recorder's watchdog thread,
+        which must keep checking the recording's length while it plays.
+        """
+        self._play_async("start", max_seconds=self.SEGMENT_BEEP_SECONDS)
+
     def play_shutdown(self) -> None:
         """
         Play the recording-end sound twice, overlapping, synchronously.
@@ -226,17 +241,19 @@ class AudioAlertsManager:
             return
         self._play_event(event)
 
-    def _play_async(self, event: str) -> None:
+    def _play_async(self, event: str, max_seconds: Optional[float] = None) -> None:
         """Spawn a daemon thread so playback never blocks the caller."""
         if not self.enabled:
             return
-        threading.Thread(target=self._play_event, args=(event,), daemon=True).start()
+        threading.Thread(
+            target=self._play_event, args=(event, max_seconds), daemon=True
+        ).start()
 
-    def _play_event(self, event: str) -> None:
+    def _play_event(self, event: str, max_seconds: Optional[float] = None) -> None:
         """Play the sound file for the given event via subprocess."""
         path = _sound_path(self._SOUND_MAP[event])
         if os.path.isfile(path):
-            self._play_file(path)
+            self._play_file(path, max_seconds)
 
     def _play_overlapping(
         self, event: str, repeats: int, offset: float, max_seconds: Optional[float]

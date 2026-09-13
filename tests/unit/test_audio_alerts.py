@@ -94,6 +94,42 @@ class TestDisabledMode:
 
 
 # ---------------------------------------------------------------------------
+# Segment beep
+# ---------------------------------------------------------------------------
+
+
+class TestSegmentBeep:
+    """play_segment() is a short, non-blocking tick made from the start sound."""
+
+    def test_plays_the_start_sound_cut_short(self):
+        a = AudioAlertsManager(player=_FFPLAY)
+        with patch.object(a, "_play_file") as play_file:
+            a._play_event("start", a.SEGMENT_BEEP_SECONDS)
+        play_file.assert_called_once_with(_sound_path("recording_start.mp3"), 0.7)
+
+    def test_is_played_in_a_background_thread(self):
+        """The watchdog calls it and must keep checking the recording meanwhile."""
+        a = AudioAlertsManager(player=_FFPLAY)
+        with patch("whisper_dictate.audio.alerts.threading.Thread") as mock_thread:
+            a.play_segment()
+        mock_thread.assert_called_once_with(
+            target=a._play_event, args=("start", a.SEGMENT_BEEP_SECONDS), daemon=True
+        )
+        mock_thread.return_value.start.assert_called_once_with()
+
+    def test_the_player_is_told_to_stop_early(self):
+        a = AudioAlertsManager(player=_FFPLAY)
+        command = a._command_for(_sound_path("recording_start.mp3"), a.SEGMENT_BEEP_SECONDS)
+        assert "0.7" in command
+
+    def test_is_a_no_op_when_disabled(self):
+        a = AudioAlertsManager(enabled=False)
+        with patch("whisper_dictate.audio.alerts.threading.Thread") as mock_thread:
+            a.play_segment()
+        mock_thread.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # File routing
 # ---------------------------------------------------------------------------
 

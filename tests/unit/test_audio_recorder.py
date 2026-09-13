@@ -2,7 +2,7 @@
 Unit tests for whisper_dictate.audio.recorder.AudioRecorder.
 
 No microphone is involved: the recorder's state is driven directly so the
-duration maths and the auto-stop handshake can be checked in isolation.
+duration maths and the watchdog (segment beep, cancel at the cap) can be checked in isolation.
 Hardware behaviour is covered by tests/integration/test_audio_recorder.py.
 """
 
@@ -86,45 +86,91 @@ class TestStopRecording:
         recorder.stop_recording()  # _stream is None
 
 
+def _recording(seconds: float, max_recording_seconds: float = 600,
+               segment_seconds=None) -> AudioRecorder:
+    """A recorder that is 'recording' and already holds `seconds` of audio."""
+    rec = AudioRecorder(
+        alerts=MagicMock(), verbose=False,
+        max_recording_seconds=max_recording_seconds, segment_seconds=segment_seconds,
+    )
+    rec.sample_rate = 16000
+    rec._buffer = _chunks(int(seconds * rec.sample_rate / AudioRecorder.CHUNK_SIZE))
+    rec._recording = True
+    return rec
+
+
 # ---------------------------------------------------------------------------
-# Auto-stop
+# Cancel at the cap
 # ---------------------------------------------------------------------------
 
 
-class TestAutoStop:
-    """The watchdog hands the recording over without duplicating the alert."""
+class TestCancelAtCap:
+    """A recording nobody stopped is discarded at the cap, never transcribed."""
 
     @pytest.fixture
-    def auto_stopped(self):
-        """Run the watchdog once with the duration limit already exceeded."""
-        on_auto_stop = MagicMock()
-        rec = AudioRecorder(
-            alerts=MagicMock(), verbose=False, on_auto_stop=on_auto_stop,
-            max_recording_seconds=1,
-        )
-        rec.sample_rate = 16000
-        rec._buffer = _chunks(1000)  # 64 s, well past the 1 s limit
-        rec._recording = True
+    def cancelled(self) -> AudioRecorder:
+        """Run the watchdog with the cap already exceeded (64 s against 1 s)."""
+        rec = _recording(64, max_recording_seconds=1)
         rec._watchdog_loop()
-        return rec, on_auto_stop
+        return rec
 
-    def test_notifies_the_client(self, auto_stopped):
-        _, on_auto_stop = auto_stopped
-        on_auto_stop.assert_called_once_with()
+    def test_stops_recording(self, cancelled):
+        assert cancelled.is_recording is False
 
-    def test_clears_the_recording_flag(self, auto_stopped):
-        rec, _ = auto_stopped
-        assert rec.is_recording is False
+    def test_discards_the_audio(self, cancelled):
+        assert cancelled.get_duration() == 0.0
 
-    def test_does_not_play_the_stop_alert(self, auto_stopped):
-        """
-        stop_recording() plays it when the client picks the frames up. Playing
-        it here too produced a double beep on every auto-stop.
-        """
-        rec, _ = auto_stopped
-        rec.alerts.play_stop.assert_not_called()
+    def test_plays_the_error_beep_once(self, cancelled):
+        cancelled.alerts.play_error.assert_called_once_with()
 
-    def test_the_handover_plays_exactly_one_alert(self, auto_stopped):
-        rec, _ = auto_stopped
-        rec.stop_recording()
-        rec.alerts.play_stop.assert_called_once_with()
+    def test_a_later_stop_returns_nothing_and_stays_quiet(self, cancelled):
+        """F9 after a cancel must not transcribe the discarded audio or beep 'stop'."""
+        assert cancelled.stop_recording() == []
+        cancelled.alerts.play_stop.assert_not_called()
+
+    def test_a_recording_under_the_cap_is_left_alone(self):
+        rec = _recording(20, max_recording_seconds=30)
+        rec._watchdog_tick(None)
+        assert rec.is_recording is True
+        rec.alerts.play_error.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Segment beep
+# ---------------------------------------------------------------------------
+
+
+class TestSegmentBeep:
+    """Each new segment gets one short beep, and the recording keeps going."""
+
+    def test_beeps_when_a_segment_boundary_is_crossed(self):
+        rec = _recording(40, segment_seconds=30)
+        assert rec._watchdog_tick(30) == 60
+        rec.alerts.play_segment.assert_called_once_with()
+
+    def test_beeps_once_per_boundary(self):
+        rec = _recording(40, segment_seconds=30)
+        rec._watchdog_tick(rec._watchdog_tick(30))
+        rec.alerts.play_segment.assert_called_once_with()
+
+    def test_keeps_recording_after_the_beep(self):
+        rec = _recording(40, segment_seconds=30)
+        rec._watchdog_tick(30)
+        assert rec.is_recording is True
+        assert rec.get_duration() == pytest.approx(40, abs=0.1)
+
+    def test_no_beep_before_the_first_boundary(self):
+        rec = _recording(20, segment_seconds=30)
+        assert rec._watchdog_tick(30) == 30
+        rec.alerts.play_segment.assert_not_called()
+
+    def test_no_beep_without_segment_seconds(self):
+        rec = _recording(40)
+        assert rec._watchdog_tick(None) is None
+        rec.alerts.play_segment.assert_not_called()
+
+    def test_the_cap_cancels_instead_of_beeping(self):
+        rec = _recording(40, max_recording_seconds=30, segment_seconds=30)
+        rec._watchdog_tick(30)
+        rec.alerts.play_segment.assert_not_called()
+        rec.alerts.play_error.assert_called_once_with()
