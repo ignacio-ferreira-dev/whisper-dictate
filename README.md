@@ -95,6 +95,8 @@ whisper-dictate
 
 A recording keeps going until you press F9 again. Every 10 minutes (`TRANSCRIPTION_CHUNK_SECONDS`) a short beep tells you it is still recording. That is the segment length the transcription aims for; the actual cuts can be shorter when the 25 MB upload budget binds first (at sample rates above 20 kHz), so treat the beep as "still going", not as an exact marker of where the audio was split. A recording still running after 30 minutes (`MAX_RECORDING_MINUTES`) is assumed to be forgotten and is **cancelled**: the audio is discarded, nothing is typed, and the error beep plays.
 
+The tick plays through your speakers while the microphone is recording, so the microphone picks it up and it ends up in the audio sent to Whisper — harmless in practice, and avoidable with headphones or a lower `ALERT_VOLUME`. The tick follows `TRANSCRIPTION_CHUNK_SECONDS`; it has no separate setting, so lowering that for upload reasons also makes the tick more frequent. `ALERTS_ENABLED=false` silences it along with every other sound.
+
 ### Long recordings
 
 Whisper accepts at most 25 MB per request — about 13 minutes of audio. Anything longer than `TRANSCRIPTION_CHUNK_SECONDS` (10 minutes by default — the same length that used to be the hard cut-off) is split into segments, which are sent in parallel (`TRANSCRIPTION_MAX_PARALLEL` at a time) and joined back in order before typing. Each cut is placed at the quietest moment in the 3 seconds before the boundary, so words are not sliced in half. Short dictations are unaffected: they still go out as a single request.
