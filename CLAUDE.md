@@ -22,8 +22,8 @@ run.sh             conda activate whisper-flow && whisper-dictate
 ## Working rules
 
 - **Env**: conda env `whisper-flow` (`environment.yml`). Never install into base.
-- **Tests**: `pytest tests/unit` is the default suite; `tests/integration` calls the Whisper
-  API and **spends money** — run it only when explicitly asked.
+- **Tests**: `pytest tests/unit` is the default suite; `tests/integration` uses the real
+  microphone and speakers (no API calls) — run it only when explicitly asked.
 - **Hardware**: the app grabs the microphone and global hotkeys; never run two instances, and
   never run it from an agent session without the owner present.
 - **Branches**: work on a feature branch, PR to `master`; squash merges; English everywhere.
