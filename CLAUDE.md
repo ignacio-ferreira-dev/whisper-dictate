@@ -30,9 +30,17 @@ run.sh             conda activate whisper-flow && whisper-dictate
 - **Keep `README.md` true**: any change to hotkeys, timeouts or platform support updates it in
   the same PR.
 
-## Agent working contract
+## Code guide (always read)
 
-The machine-local contract in `.claude/` (gitignored) governs how agent sessions run here —
-bootstrap first, gates, evidence, the PR body shape. `.claude/scripts/print-agent-index.sh`
-prints the read manifest; if it reports the contract missing, say so instead of working from
-memory.
+@.claude/coding/coding-guidelines.md
+
+## Agent working contract (machine-local, `.claude/` is gitignored)
+
+Index files, read by pointer and never auto-loaded in bulk:
+
+- Short agent rules: `.claude/rules/trabajo-de-agentes.md`
+- Task SOPs (tests, reviews): `.claude/sops/README.md`
+- Implementing a change: `.claude/development-agent-guidelines.md`
+- Full method (plans, gates, roles; read only when the task needs it): `.claude/contrato/INDEX.md`
+- Read manifest: `.claude/scripts/print-agent-index.sh`; if it reports the contract missing, say
+  so instead of working from memory.
