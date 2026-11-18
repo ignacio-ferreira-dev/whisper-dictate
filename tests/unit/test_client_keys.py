@@ -50,12 +50,15 @@ class TestRecordingLimits:
 class TestResolveKey:
     """resolve_key() maps names to the pynput objects that events compare against."""
 
-    @pytest.mark.parametrize("name,expected", [
-        ("f9", kb_module.Key.f9),
-        ("home", kb_module.Key.home),
-        ("HOME", kb_module.Key.home),
-        ("esc", kb_module.Key.esc),
-    ])
+    @pytest.mark.parametrize(
+        "name,expected",
+        [
+            ("f9", kb_module.Key.f9),
+            ("home", kb_module.Key.home),
+            ("HOME", kb_module.Key.home),
+            ("esc", kb_module.Key.esc),
+        ],
+    )
     def test_resolves_special_keys(self, name, expected):
         assert resolve_key(name) == expected
 
@@ -150,3 +153,68 @@ class TestShutdownSequence:
         client._shutdown()
 
         assert order.mock_calls == [call.teardown(), call.play_shutdown()]
+
+
+# ---------------------------------------------------------------------------
+# Retype key (F10)
+# ---------------------------------------------------------------------------
+
+
+class TestRetypeLast:
+    """F10 types the last transcription again and plays the done sound."""
+
+    def test_default_retype_key_is_f10(self):
+        assert _client()._retype_key == kb_module.Key.f10
+
+    def test_nothing_to_retype_plays_error_and_types_nothing(self):
+        client = _client()
+        client._on_key_press(kb_module.Key.f10)
+        client._typer.type_text.assert_not_called()
+        client._alerts.play_error.assert_called_once()
+
+    def test_retypes_the_last_text_with_the_done_sound(self):
+        client = _client()
+        client._last_text = "hola mundo"
+        client._typer.type_text.return_value = True
+        client._on_key_press(kb_module.Key.f10)
+        client._typer.type_text.assert_called_once_with("hola mundo")
+        client._alerts.play_done.assert_called_once()
+
+    def test_failed_typing_plays_error(self):
+        client = _client()
+        client._last_text = "hola"
+        client._typer.type_text.return_value = False
+        client._on_key_press(kb_module.Key.f10)
+        client._alerts.play_error.assert_called_once()
+
+    def test_ignored_while_recording(self):
+        client = _client()
+        client._last_text = "hola"
+        client._recorder = MagicMock(is_recording=True)
+        client._on_key_press(kb_module.Key.f10)
+        client._typer.type_text.assert_not_called()
+
+    def test_ignored_while_transcribing(self):
+        client = _client()
+        client._last_text = "hola"
+        client._transcribing = True
+        client._on_key_press(kb_module.Key.f10)
+        client._typer.type_text.assert_not_called()
+
+    def test_guard_is_released_after_typing(self):
+        client = _client()
+        client._last_text = "hola"
+        client._on_key_press(kb_module.Key.f10)
+        assert client._transcribing is False
+
+    @pytest.mark.asyncio
+    async def test_transcription_is_remembered_even_if_typing_fails(self):
+        client = _client()
+        client._backend.transcribe = MagicMock(side_effect=lambda **_: _async_value("  texto  "))
+        client._typer.type_text.return_value = False
+        await client._transcribe_and_type_unguarded([b"x"])
+        assert client._last_text == "texto"
+
+
+async def _async_value(value):
+    return value

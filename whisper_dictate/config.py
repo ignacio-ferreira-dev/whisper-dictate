@@ -118,6 +118,7 @@ class Settings:
         # --- Keys ---
         self.hotkey: str = os.getenv("HOTKEY", "f9")
         self.quit_key: str = os.getenv("QUIT_KEY", "home")
+        self.retype_key: str = os.getenv("RETYPE_KEY", "f10")
 
         # --- UI / Alerts ---
         self.alert_volume: float = _env_number("ALERT_VOLUME", 0.8, float)

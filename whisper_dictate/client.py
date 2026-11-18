@@ -64,12 +64,16 @@ class WhisperDictateClient:
     #: deliberately *not* used: it is pressed constantly while working and used
     #: to kill the app mid-dictation.
     DEFAULT_QUIT_KEY: str = "home"
+    #: Types the last transcription again (the app often runs as a background
+    #: daemon, so a dictation can land somewhere the user did not see).
+    DEFAULT_RETYPE_KEY: str = "f10"
 
     def __init__(
         self,
         backend: TranscriptionBackend,
         hotkey: str = DEFAULT_HOTKEY,
         quit_key: str = DEFAULT_QUIT_KEY,
+        retype_key: str = DEFAULT_RETYPE_KEY,
         language: str = "auto",
         alerts: Optional[AudioAlertsManager] = None,
         typer: Optional[TextTyper] = None,
@@ -82,6 +86,7 @@ class WhisperDictateClient:
             backend:  TranscriptionBackend implementation to use.
             hotkey:   Pynput key name for the record toggle (e.g. 'f9', 'f10').
             quit_key: Pynput key name that exits the application (e.g. 'home').
+            retype_key: Pynput key name that types the last transcription again.
             language: ISO 639-1 language code or 'auto' for auto-detection.
             alerts:   AudioAlertsManager instance (created with defaults if None).
             typer:    TextTyper instance (created with defaults if None).
@@ -95,11 +100,13 @@ class WhisperDictateClient:
         self._language = language
         self._verbose = verbose
 
-        self._hotkey, self._hotkey_name = self._resolve_or_default(
-            hotkey, self.DEFAULT_HOTKEY
-        )
+        self._hotkey, self._hotkey_name = self._resolve_or_default(hotkey, self.DEFAULT_HOTKEY)
         self._quit_key, self._quit_key_name = self._resolve_or_default(
             quit_key, self.DEFAULT_QUIT_KEY
+        )
+
+        self._retype_key, self._retype_key_name = self._resolve_or_default(
+            retype_key, self.DEFAULT_RETYPE_KEY
         )
 
         self._alerts = alerts or AudioAlertsManager()
@@ -114,6 +121,8 @@ class WhisperDictateClient:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._should_quit: bool = False
         self._transcribing: bool = False
+        #: Last non-empty transcription; kept even if typing it failed so F10 can retry.
+        self._last_text: Optional[str] = None
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -136,6 +145,7 @@ class WhisperDictateClient:
 
         self._log(
             f"Ready. Press {self._hotkey_name} to record, "
+            f"{self._retype_key_name} to retype the last text, "
             f"{self._quit_key_name} to quit."
         )
 
@@ -170,9 +180,9 @@ class WhisperDictateClient:
             if key == self._hotkey:
                 if self._transcribing:
                     return  # ignore hotkey while transcription is in progress
-                asyncio.run_coroutine_threadsafe(
-                    self._toggle_recording(), self._loop
-                )
+                asyncio.run_coroutine_threadsafe(self._toggle_recording(), self._loop)
+            elif key == self._retype_key:
+                self._retype_last()
             elif key == self._quit_key:
                 self._log(f"{self._quit_key_name} pressed - quitting...")
                 self._should_quit = True
@@ -180,6 +190,20 @@ class WhisperDictateClient:
             # Never let a listener callback raise: pynput would stop the
             # listener and the app would silently go deaf to the hotkey.
             self._log(f"Key handling error: {e}")
+
+    def _retype_last(self) -> None:
+        """Type the last transcription again (runs in the pynput thread)."""
+        if self._transcribing or self._recorder.is_recording:
+            return  # typing now would race a transcription or land in the recording
+        if not self._last_text:
+            self._log("Nothing to retype yet")
+            self._alerts.play_error()
+            return
+        self._transcribing = True  # block the record hotkey while typing
+        try:
+            self._type_and_notify(self._last_text)
+        finally:
+            self._transcribing = False
 
     async def _toggle_recording(self) -> None:
         """Start or stop recording depending on the current state."""
@@ -237,6 +261,11 @@ class WhisperDictateClient:
             return
 
         self._log(f"Transcription: '{text}'")
+        self._last_text = text
+        self._type_and_notify(text)
+
+    def _type_and_notify(self, text: str) -> None:
+        """Type text at the cursor and play the done/error sound."""
         if self._typer.type_text(text):
             self._alerts.play_done()
             self._log("Text typed at cursor position")
@@ -272,6 +301,7 @@ class WhisperDictateClient:
         print("  WHISPER DICTATE - Voice to Keyboard")
         print("=" * 45)
         print(f"  {self._hotkey_name:<5}: Start / Stop recording")
+        print(f"  {self._retype_key_name:<5}: Retype last transcription")
         print(f"  {self._quit_key_name:<5}: Quit")
         print(f"  Language : {self._language}")
         print("=" * 45)
