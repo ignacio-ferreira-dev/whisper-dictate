@@ -20,8 +20,7 @@ pytestmark = pytest.mark.unit
 @pytest.fixture
 def settings(monkeypatch) -> Settings:
     """Settings built from an environment with nothing configured."""
-    for name in ("HOTKEY", "QUIT_KEY", "DEFAULT_LANGUAGE", "ALERT_VOLUME",
-                 "ALERTS_ENABLED"):
+    for name in ("HOTKEY", "QUIT_KEY", "DEFAULT_LANGUAGE", "ALERT_VOLUME", "ALERTS_ENABLED"):
         monkeypatch.delenv(name, raising=False)
     return Settings()
 
@@ -59,20 +58,28 @@ class TestDefaults:
 class TestResolutionOrder:
     """Flag beats .env beats default, for every setting the CLI exposes."""
 
-    @pytest.mark.parametrize("env_name,attribute,value", [
-        ("HOTKEY", "hotkey", "f10"),
-        ("QUIT_KEY", "quit_key", "end"),
-        ("DEFAULT_LANGUAGE", "language", "es"),
-    ])
+    @pytest.mark.parametrize(
+        "env_name,attribute,value",
+        [
+            ("HOTKEY", "hotkey", "f10"),
+            ("QUIT_KEY", "quit_key", "end"),
+            ("RETYPE_KEY", "retype_key", "f11"),
+            ("DEFAULT_LANGUAGE", "language", "es"),
+        ],
+    )
     def test_env_overrides_the_default(self, monkeypatch, env_name, attribute, value):
         monkeypatch.setenv(env_name, value)
         assert getattr(_parse(Settings()), attribute) == value
 
-    @pytest.mark.parametrize("env_name,flag,attribute", [
-        ("HOTKEY", "--hotkey", "hotkey"),
-        ("QUIT_KEY", "--quit-key", "quit_key"),
-        ("DEFAULT_LANGUAGE", "--language", "language"),
-    ])
+    @pytest.mark.parametrize(
+        "env_name,flag,attribute",
+        [
+            ("HOTKEY", "--hotkey", "hotkey"),
+            ("QUIT_KEY", "--quit-key", "quit_key"),
+            ("RETYPE_KEY", "--retype-key", "retype_key"),
+            ("DEFAULT_LANGUAGE", "--language", "language"),
+        ],
+    )
     def test_flag_overrides_the_env(self, monkeypatch, env_name, flag, attribute):
         monkeypatch.setenv(env_name, "from_env")
         args = _parse(Settings(), flag, "from_flag")

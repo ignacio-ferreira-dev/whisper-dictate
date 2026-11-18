@@ -41,6 +41,12 @@ def build_parser(settings: Settings) -> argparse.ArgumentParser:
         help="Pynput key name that quits the application",
     )
     parser.add_argument(
+        "--retype-key",
+        default=settings.retype_key,
+        metavar="KEY",
+        help="Pynput key name that types the last transcription again",
+    )
+    parser.add_argument(
         "--language",
         default=settings.default_language,
         metavar="CODE",
@@ -118,8 +124,7 @@ def build_backend(settings: Settings, name: str):
         factory = BACKENDS[name]
     except KeyError:
         raise ValueError(
-            f"unknown transcription backend {name!r} "
-            f"(available: {', '.join(sorted(BACKENDS))})"
+            f"unknown transcription backend {name!r} " f"(available: {', '.join(sorted(BACKENDS))})"
         ) from None
 
     return ChunkedTranscriptionBackend(
@@ -150,6 +155,7 @@ async def async_main(args: argparse.Namespace, settings: Settings) -> int:
         backend=backend,
         hotkey=args.hotkey,
         quit_key=args.quit_key,
+        retype_key=args.retype_key,
         language=args.language,
         alerts=alerts,
         typer=typer,
