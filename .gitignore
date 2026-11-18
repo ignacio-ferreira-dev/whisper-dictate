@@ -171,3 +171,9 @@ temp_tests/
 *.wav
 
 nohup.out
+# machine-local agent method + scratch (never committed)
+.claude/
+.worktree/
+temp_files/
+.pytest_cache/
+.benchmarks/
