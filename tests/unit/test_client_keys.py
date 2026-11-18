@@ -156,19 +156,19 @@ class TestShutdownSequence:
 
 
 # ---------------------------------------------------------------------------
-# Retype key (F10)
+# Retype key (F2)
 # ---------------------------------------------------------------------------
 
 
 class TestRetypeLast:
-    """F10 types the last transcription again and plays the done sound."""
+    """F2 types the last transcription again and plays the done sound."""
 
-    def test_default_retype_key_is_f10(self):
-        assert _client()._retype_key == kb_module.Key.f10
+    def test_default_retype_key_is_f2(self):
+        assert _client()._retype_key == kb_module.Key.f2
 
     def test_nothing_to_retype_plays_error_and_types_nothing(self):
         client = _client()
-        client._on_key_press(kb_module.Key.f10)
+        client._on_key_press(kb_module.Key.f2)
         client._typer.type_text.assert_not_called()
         client._alerts.play_error.assert_called_once()
 
@@ -176,7 +176,7 @@ class TestRetypeLast:
         client = _client()
         client._last_text = "hola mundo"
         client._typer.type_text.return_value = True
-        client._on_key_press(kb_module.Key.f10)
+        client._on_key_press(kb_module.Key.f2)
         client._typer.type_text.assert_called_once_with("hola mundo")
         client._alerts.play_done.assert_called_once()
 
@@ -184,27 +184,27 @@ class TestRetypeLast:
         client = _client()
         client._last_text = "hola"
         client._typer.type_text.return_value = False
-        client._on_key_press(kb_module.Key.f10)
+        client._on_key_press(kb_module.Key.f2)
         client._alerts.play_error.assert_called_once()
 
     def test_ignored_while_recording(self):
         client = _client()
         client._last_text = "hola"
         client._recorder = MagicMock(is_recording=True)
-        client._on_key_press(kb_module.Key.f10)
+        client._on_key_press(kb_module.Key.f2)
         client._typer.type_text.assert_not_called()
 
     def test_ignored_while_transcribing(self):
         client = _client()
         client._last_text = "hola"
         client._transcribing = True
-        client._on_key_press(kb_module.Key.f10)
+        client._on_key_press(kb_module.Key.f2)
         client._typer.type_text.assert_not_called()
 
     def test_guard_is_released_after_typing(self):
         client = _client()
         client._last_text = "hola"
-        client._on_key_press(kb_module.Key.f10)
+        client._on_key_press(kb_module.Key.f2)
         assert client._transcribing is False
 
     @pytest.mark.asyncio
