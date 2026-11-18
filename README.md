@@ -128,6 +128,17 @@ Any [pynput key name](https://pynput.readthedocs.io/en/latest/keyboard.html#pynp
 
 Pick a quit key you will not hit by accident — it is captured globally, in every application.
 
+### Start automatically at login (Linux, systemd)
+
+```bash
+./scripts/install-autostart.sh              # installs + enables a systemd *user* service
+systemctl --user start whisper-dictate      # start it now without logging out
+journalctl --user -u whisper-dictate -f     # logs
+./scripts/install-autostart.sh --uninstall  # remove it
+```
+
+It runs `whisper-dictate` from the `whisper-flow` conda env once your graphical session starts (it needs your X11 display and microphone, so it is a user service, not a system one). The quit key exits for good; a crash restarts it after 10 s. Never run it twice: stop the service before launching `whisper-dictate` by hand.
+
 ### Options
 
 ```
