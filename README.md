@@ -91,7 +91,7 @@ whisper-dictate
 |-----|--------|
 | `F9` | Start recording (plays a start beep) |
 | `F9` again | Stop recording, transcribe, type at cursor |
-| `F2` | Type the last transcription again (plays the done sound) |
+| `F1` | Type the last transcription again (plays the done sound) |
 | `HOME` | Quit (plays two overlapping beeps) |
 
 A recording keeps going until you press F9 again. Every 10 minutes (`TRANSCRIPTION_CHUNK_SECONDS`) a short beep tells you it is still recording. That is the segment length the transcription aims for; the actual cuts can be shorter when the 25 MB upload budget binds first (at sample rates above 20 kHz), so treat the beep as "still going", not as an exact marker of where the audio was split. A recording still running after 30 minutes (`MAX_RECORDING_MINUTES`) is assumed to be forgotten and is **cancelled**: the audio is discarded, nothing is typed, and the error beep plays.
@@ -114,7 +114,7 @@ Both keys are configurable, in `.env` or on the command line:
 # .env
 HOTKEY=f9
 QUIT_KEY=home
-RETYPE_KEY=f2
+RETYPE_KEY=f1
 ```
 
 ```bash
@@ -146,7 +146,7 @@ whisper-dictate --help
 
   --hotkey KEY        Pynput key name for the record toggle  [default: f9]
   --quit-key KEY      Pynput key name that quits the app  [default: home]
-  --retype-key KEY    Pynput key name that types the last transcription again  [default: f2]
+  --retype-key KEY    Pynput key name that types the last transcription again  [default: f1]
   --language CODE     Language code: 'auto', 'es', 'en', 'fr', ...  [default: auto]
   --volume FLOAT      Alert volume 0.0–1.0  [default: 0.8]
   --no-alerts         Disable audio alerts
@@ -229,7 +229,7 @@ All settings can be set in `.env` (copy from `.env.example`) or as environment v
 | `DEFAULT_LANGUAGE` | `auto` | ISO 639-1 code or `auto` |
 | `HOTKEY` | `f9` | Key that starts/stops recording |
 | `QUIT_KEY` | `home` | Key that quits the application |
-| `RETYPE_KEY` | `f2` | Key that types the last transcription again (kept in memory; lost when the app restarts) |
+| `RETYPE_KEY` | `f1` | Key that types the last transcription again (kept in memory; lost when the app restarts) |
 | `MAX_RECORDING_MINUTES` | `30` | A recording still running at this length is cancelled and discarded |
 | `TRANSCRIPTION_CHUNK_SECONDS` | `600` | Longer recordings are split into segments of at most this length |
 | `TRANSCRIPTION_MAX_PARALLEL` | `4` | Most segments transcribed at the same time |

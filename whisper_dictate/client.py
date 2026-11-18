@@ -66,7 +66,7 @@ class WhisperDictateClient:
     DEFAULT_QUIT_KEY: str = "home"
     #: Types the last transcription again (the app often runs as a background
     #: daemon, so a dictation can land somewhere the user did not see).
-    DEFAULT_RETYPE_KEY: str = "f2"
+    DEFAULT_RETYPE_KEY: str = "f1"
 
     def __init__(
         self,
@@ -121,7 +121,7 @@ class WhisperDictateClient:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._should_quit: bool = False
         self._transcribing: bool = False
-        #: Last non-empty transcription; kept even if typing it failed so F2 can retry.
+        #: Last non-empty transcription; kept even if typing it failed so F1 can retry.
         self._last_text: Optional[str] = None
 
     # ------------------------------------------------------------------
